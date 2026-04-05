@@ -6,20 +6,20 @@ Usage
 
 The developer of Fiduciary Duty hereby authorizes the following uses of this application, free of charge:
 
-Personal use for study, exam preparation, and training
-Sharing the application with friends, family, and coworkers
-Distribution within educational or professional organizations for non-commercial purposes
-Demonstration and evaluation of the platform
+Personal use for study, exam preparation, and training.
+Sharing the application with friends, family, and coworkers.
+Distribution within educational or professional organizations for non-commercial purposes.
+Demonstration and evaluation of the platform.
 
 Restrictions
 
 The following are strictly prohibited without express written consent from the developer:
 
-Selling, licensing, or monetizing the underlying source code in any form
-Selling, licensing, or monetizing the visual design, UI components, or assets
-Repackaging or redistributing this application as a commercial product
-Incorporating the source code or visuals into any paid product or service
-Claiming ownership or authorship of this work
+Selling, licensing, or monetizing the underlying source code in any form.
+Selling, licensing, or monetizing the visual design, UI components, or assets.
+Repackaging or redistributing this application as a commercial product.
+Incorporating the source code or visuals into any paid product or service.
+Claiming ownership or authorship of this work.
 
 License
 
