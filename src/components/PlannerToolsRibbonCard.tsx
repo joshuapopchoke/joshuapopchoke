@@ -23,6 +23,9 @@ function monthlyPayment(principal: number, annualRate: number, years: number) {
 export function PlannerToolsRibbonCard() {
   const clients = useGameStore((state) => state.clients);
   const tickers = useGameStore((state) => state.tickers);
+  const startRecommendationDialogue = useGameStore((state) => state.startRecommendationDialogue);
+  const startClientReviewMeeting = useGameStore((state) => state.startClientReviewMeeting);
+  const startOperationsWorkflow = useGameStore((state) => state.startOperationsWorkflow);
   const activeClient = useSelectedClient();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState(activeClient?.id ?? clients[0]?.id ?? "");
@@ -155,6 +158,14 @@ export function PlannerToolsRibbonCard() {
     return { baseSuccessRate, stressedSuccessRate };
   }, [selectedClient, selectedClientUsd, stressHaircut]);
 
+  const traditionalIraSleeve = useMemo(
+    () => selectedClient?.accountSleeves.find((sleeve) => sleeve.registration.includes("Traditional IRA")) ?? null,
+    [selectedClient]
+  );
+  const traditionalIraBalance = traditionalIraSleeve && selectedClient
+    ? selectedClient.sleeveCashBalances[traditionalIraSleeve.id] ?? 0
+    : 0;
+
   return (
     <>
       <div className="ribbon-item ribbon-item--planner-tools">
@@ -202,6 +213,44 @@ export function PlannerToolsRibbonCard() {
                   </label>
                   <strong>{socialSecurityOutput ? `${formatCurrency(socialSecurityOutput.annualBenefit)}/yr` : "Unavailable"}</strong>
                   <small>{socialSecurityOutput?.comparison}</small>
+                  {selectedClient?.id === "retiree" ? (
+                    <div className="insurance-actions">
+                      <button
+                        className="control-btn"
+                        onClick={() => {
+                          startRecommendationDialogue(selectedClient.id, "social-security-timing");
+                          setIsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Present Claiming Review
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="planner-tool-card">
+                  <span>RMD and withdrawals</span>
+                  <strong>{traditionalIraSleeve ? `${formatCurrency(traditionalIraBalance)} in ${traditionalIraSleeve.registration}` : "No Traditional IRA sleeve"}</strong>
+                  <small>
+                    {traditionalIraSleeve
+                      ? "Use the workflow to coordinate the IRA distribution into the taxable reserve instead of treating the whole client account like one cash bucket."
+                      : "This client does not currently need a Traditional IRA distribution workflow."}
+                  </small>
+                  {selectedClient?.id === "retiree" && traditionalIraSleeve ? (
+                    <div className="insurance-actions">
+                      <button
+                        className="control-btn"
+                        onClick={() => {
+                          startOperationsWorkflow(selectedClient.id, "rmd");
+                          setIsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Run RMD Workflow
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="planner-tool-card">
@@ -314,6 +363,26 @@ export function PlannerToolsRibbonCard() {
                   </label>
                   <strong>{stressOutput ? `${stressOutput.baseSuccessRate.toFixed(0)}% base | ${stressOutput.stressedSuccessRate.toFixed(0)}% stressed` : "Unavailable"}</strong>
                   <small>Use this to compare whether the plan still holds up after a rougher return sequence.</small>
+                </div>
+
+                <div className="planner-tool-card">
+                  <span>Client review meeting</span>
+                  <strong>{selectedClient?.crmProfile.nextReviewWindow ?? "Select client"}</strong>
+                  <small>{selectedClient?.crmProfile.nextTask ?? "Open a planning review to walk through the household agenda and follow-up items."}</small>
+                  {selectedClient ? (
+                    <div className="insurance-actions">
+                      <button
+                        className="control-btn"
+                        onClick={() => {
+                          startClientReviewMeeting(selectedClient.id);
+                          setIsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Open Review Meeting
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}

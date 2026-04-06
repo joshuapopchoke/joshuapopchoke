@@ -1,4 +1,4 @@
-import type { ClientAccount, ClientHolding, MarginPosition } from "./client";
+import type { ClientAccount, ClientAccountSleeve, ClientHolding, MarginPosition } from "./client";
 import type { FinancialProfile, Ticker } from "./market";
 import type { Question } from "./question";
 
@@ -105,9 +105,12 @@ export interface ClientMeetingOptionState {
   liquidityNeed?: "Low" | "Moderate" | "High";
 }
 
+export type ClientMeetingKind = "default" | "review";
+
 export interface ClientMeetingState {
   clientId: string;
   meetingId: string;
+  meetingKind?: ClientMeetingKind;
   title: string;
   summary: string;
   question: string;
@@ -173,12 +176,18 @@ export interface OperationsRequestOptionState {
   outcome: string;
   trustDelta: number;
   cashDelta?: number;
+  fromSleeveId?: string | null;
+  toSleeveId?: string | null;
+  transferAmount?: number;
   noteHint?: string;
 }
+
+export type OperationsWorkflowKind = "default" | "rmd";
 
 export interface OperationsRequestState {
   clientId: string;
   requestId: string;
+  requestKind?: OperationsWorkflowKind;
   title: string;
   summary: string;
   prompt: string;
@@ -264,6 +273,42 @@ export interface RevenueSnapshot {
   trailingCycleRevenue: number;
 }
 
+export interface TrainingLaneResult {
+  label: string;
+  score: number;
+  grade: string;
+  summary: string;
+}
+
+export interface TraineeProfile {
+  id: string;
+  name: string;
+  role: "Trainee" | "Advisor Trainee" | "Manager";
+  createdAt: number;
+}
+
+export interface TrainingSessionReport {
+  id: string;
+  traineeId: string;
+  traineeName: string;
+  difficulty: PlayDifficulty;
+  endedAt: number;
+  overall: TrainingLaneResult;
+  examReadiness: TrainingLaneResult;
+  advisorPerformance: TrainingLaneResult;
+  clientOutcome: TrainingLaneResult;
+  compliance: TrainingLaneResult;
+  portfolioOutcome: TrainingLaneResult;
+  finalScore: number;
+  totalAum: number;
+  personalEquity: number;
+  studyAccuracy: number;
+  correctAnswers: number;
+  answeredQuestions: number;
+  clientCount: number;
+  lostClientCount: number;
+}
+
 export interface QuestionTrackerState {
   recentlyAsked: string[];
   questionsAsked: number;
@@ -280,10 +325,18 @@ export interface ActiveQuestionState {
 }
 
 export interface GameStateShape {
+  trainees: TraineeProfile[];
+  activeTraineeId: string;
+  trainingReports: TrainingSessionReport[];
+  lastRecordedSessionKey: string | null;
   score: number;
   personalPortfolioUsd: number;
+  personalAccountSleeves: ClientAccountSleeve[];
+  personalSleeveCashBalances: Record<string, number>;
   personalHoldings: Record<string, ClientHolding>;
+  personalHoldingAccountMap: Record<string, string>;
   personalShortHoldings: Record<string, MarginPosition>;
+  personalShortHoldingAccountMap: Record<string, string>;
   personalMarginDebt: number;
   personalMarginCall: boolean;
   playerComplianceLevel: number;

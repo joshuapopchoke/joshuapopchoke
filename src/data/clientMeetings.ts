@@ -1,4 +1,4 @@
-import type { PlayDifficulty, ClientMeetingState } from "../types/gameState";
+import type { PlayDifficulty, ClientMeetingKind, ClientMeetingState } from "../types/gameState";
 import type { ClientAccount } from "../types/client";
 
 type MeetingTemplate = Omit<ClientMeetingState, "resolved" | "selectedOptionId" | "feedback">;
@@ -169,6 +169,160 @@ const CLIENT_MEETING_BANK: Record<string, MeetingTemplate[]> = {
   ]
 };
 
+const CLIENT_REVIEW_BANK: Record<string, MeetingTemplate> = {
+  retiree: {
+    clientId: "retiree",
+    meetingId: "retiree-annual-review",
+    meetingKind: "review",
+    title: "Annual Retirement Income Review",
+    summary: "Margaret wants to walk through withdrawals, Social Security support, and whether the current reserve bucket still fits her age and spending needs.",
+    question: "How should the review be framed so the plan stays realistic and reassuring?",
+    options: [
+      {
+        id: "review-income-buckets",
+        label: "Review reserve buckets, income sources, and a modest equity sleeve together before changing anything major",
+        outcome: "Margaret felt the review was calm, realistic, and tied directly to how her retirement cash flow actually works.",
+        trustDelta: 8,
+        reserveMonthsDelta: 1,
+        liquidityNeed: "High"
+      },
+      {
+        id: "review-chase-return",
+        label: "Push harder into growth names because inflation means the account needs more upside immediately",
+        outcome: "Margaret felt the review leaned too hard on return chasing and not enough on protecting a retirement-income plan.",
+        trustDelta: -8,
+        expenseDelta: 150
+      },
+      {
+        id: "review-no-change",
+        label: "Tell her everything is fine and skip a deeper review for now",
+        outcome: "Margaret appreciated the reassurance, but the review felt too light for the planning questions she raised.",
+        trustDelta: -2
+      }
+    ]
+  },
+  young_pro: {
+    clientId: "young_pro",
+    meetingId: "young-pro-annual-review",
+    meetingKind: "review",
+    title: "Accumulation Review Meeting",
+    summary: "Derek wants an annual review that covers workplace benefits, concentrated growth risk, and whether the taxable account should still be this aggressive.",
+    question: "What kind of review keeps the advice useful instead of generic?",
+    options: [
+      {
+        id: "review-benefits-and-risk",
+        label: "Tie the review to match capture, reserve needs, and concentration discipline before changing the growth sleeve",
+        outcome: "Derek saw the review as practical because it linked growth decisions back to real planning priorities.",
+        trustDelta: 7,
+        reserveMonthsDelta: 1,
+        liquidityNeed: "Moderate"
+      },
+      {
+        id: "review-performance-only",
+        label: "Make the whole review about the best-performing names and whether to add more to them",
+        outcome: "Derek liked the energy, but the review felt shallow because it ignored the rest of the plan.",
+        trustDelta: -5
+      },
+      {
+        id: "review-delay",
+        label: "Keep the review very short and push bigger planning questions to later",
+        outcome: "Derek stayed engaged, but the review missed a chance to connect benefits and risk to the portfolio.",
+        trustDelta: -1
+      }
+    ]
+  },
+  family: {
+    clientId: "family",
+    meetingId: "family-annual-review",
+    meetingKind: "review",
+    title: "Household Review Meeting",
+    summary: "The Kowalskis want their annual review to cover tuition funding, the mortgage, insurance, and whether the current account mix still matches family priorities.",
+    question: "What review structure gives them the best planning value?",
+    options: [
+      {
+        id: "review-balance-household",
+        label: "Review tuition, reserves, protection, and debt together before making new investment promises",
+        outcome: "The family felt the review finally treated the whole household plan as one connected system.",
+        trustDelta: 8,
+        reserveMonthsDelta: 1,
+        liquidityNeed: "High"
+      },
+      {
+        id: "review-college-only",
+        label: "Focus only on the 529 and ignore the mortgage, reserves, and insurance questions",
+        outcome: "The family felt the review became too narrow for the real tradeoffs they are living with.",
+        trustDelta: -6
+      },
+      {
+        id: "review-market-opinion",
+        label: "Spend most of the review talking about where the stock market might go next",
+        outcome: "The family heard market commentary, but not enough about their actual planning decisions.",
+        trustDelta: -4
+      }
+    ]
+  },
+  entrepreneur: {
+    clientId: "entrepreneur",
+    meetingId: "entrepreneur-annual-review",
+    meetingKind: "review",
+    title: "Private Wealth Strategy Review",
+    summary: "Sofia wants a full strategy review covering tax reserves, trust structure, liquidity buckets, and whether the investment sleeves still match post-exit goals.",
+    question: "How should the review be framed?",
+    options: [
+      {
+        id: "review-liquidity-tax-estate",
+        label: "Review taxes, liquidity, estate structure, and long-term deployment before adding complexity",
+        outcome: "Sofia liked that the review stayed strategic and coordinated instead of turning into product clutter.",
+        trustDelta: 8,
+        reserveMonthsDelta: 1,
+        liquidityNeed: "Moderate"
+      },
+      {
+        id: "review-chase-opportunity",
+        label: "Spend the review mostly on the next opportunistic trade ideas",
+        outcome: "Sofia felt the review drifted away from the bigger tax and estate issues that actually matter.",
+        trustDelta: -6
+      },
+      {
+        id: "review-slow-walk",
+        label: "Keep the review high-level and defer the hard decisions again",
+        outcome: "The review felt polished but not decisive enough for a complex planning relationship.",
+        trustDelta: -2
+      }
+    ]
+  },
+  institutional: {
+    clientId: "institutional",
+    meetingId: "institutional-annual-review",
+    meetingKind: "review",
+    title: "Committee Review Meeting",
+    summary: "The committee wants a formal review of spending support, policy drift, liquidity, and whether recent performance is masking governance issues.",
+    question: "What review style best fits the mandate?",
+    options: [
+      {
+        id: "review-policy-and-spending",
+        label: "Review spending support, policy drift, and governance before discussing return enhancements",
+        outcome: "The committee saw the review as disciplined and consistent with fiduciary oversight.",
+        trustDelta: 7,
+        reserveMonthsDelta: 2,
+        liquidityNeed: "Moderate"
+      },
+      {
+        id: "review-performance-chasing",
+        label: "Frame the review mostly around recent winners and what to add more of now",
+        outcome: "The committee felt the review drifted away from process and toward performance chasing.",
+        trustDelta: -8
+      },
+      {
+        id: "review-minimal",
+        label: "Keep the review light and avoid deeper spending-policy questions",
+        outcome: "The committee wanted a more rigorous policy review than the meeting delivered.",
+        trustDelta: -3
+      }
+    ]
+  }
+};
+
 export function getClientMeetingScenario(client: ClientAccount, difficulty: PlayDifficulty, cycleNumber: number): ClientMeetingState {
   const bank = CLIENT_MEETING_BANK[client.id] ?? [];
   const fallback = bank[0];
@@ -187,6 +341,38 @@ export function getClientMeetingScenario(client: ClientAccount, difficulty: Play
 
   return {
     ...base,
+    options,
+    resolved: false,
+    selectedOptionId: null,
+    feedback: null
+  };
+}
+
+export function getClientReviewMeetingScenario(
+  client: ClientAccount,
+  difficulty: PlayDifficulty,
+  cycleNumber: number
+): ClientMeetingState {
+  const base = CLIENT_REVIEW_BANK[client.id] ?? CLIENT_MEETING_BANK[client.id]?.[0];
+  const reviewKind: ClientMeetingKind = "review";
+
+  if (!base) {
+    return getClientMeetingScenario(client, difficulty, cycleNumber);
+  }
+
+  const options = base.options.map((option) => ({
+    ...option,
+    trustDelta:
+      difficulty === "senior" ? Math.round(option.trustDelta * 1.1) :
+      difficulty === "advisor" ? option.trustDelta :
+      difficulty === "associate" ? Math.round(option.trustDelta * 0.95) :
+      difficulty === "trainee" ? Math.round(option.trustDelta * 0.9) :
+      Math.round(option.trustDelta * 0.85)
+  }));
+
+  return {
+    ...base,
+    meetingKind: reviewKind,
     options,
     resolved: false,
     selectedOptionId: null,

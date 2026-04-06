@@ -11,9 +11,11 @@ import {
 import { buildPortfolioAnalyticsSnapshot } from "../engine/marketAnalyticsEngine";
 import { betaFitLabel, betaRangeForRisk, calculatePortfolioBeta } from "../engine/portfolioAnalytics";
 import { buildPolicyReviewSnapshot } from "../engine/policyReviewEngine";
+import { buildSocialSecurityCalculator } from "../engine/plannerCalculatorEngine";
 import { buildRebalancePlan } from "../engine/rebalancingEngine";
 import { buildRecommendationCards } from "../engine/recommendationEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
+import { buildTaxManagementSnapshot } from "../engine/taxManagementEngine";
 import { buildAdvancedTaxPlanningSnapshot, estimatePortfolioTaxSnapshot } from "../engine/taxEngine";
 import { useGameStore } from "../store/gameStore";
 
@@ -33,20 +35,43 @@ function annualizedRevenue(accountUsd: number, feeBps: number) {
   return accountUsd * feeBps / 10000;
 }
 
+function crmCadenceLabel(cycleNumber: number, clientId: string) {
+  const offset = clientId.length % 3;
+  const cyclePhase = (cycleNumber + offset) % 6;
+
+  if (cyclePhase === 0) {
+    return "Review overdue";
+  }
+  if (cyclePhase <= 2) {
+    return "Review due soon";
+  }
+  return "Cadence on track";
+}
+
 export function PortfolioPanel() {
   const clients = useGameStore((state) => state.clients);
   const activeClientId = useGameStore((state) => state.activeClientId);
   const personalPortfolioUsd = useGameStore((state) => state.personalPortfolioUsd);
+  const personalAccountSleeves = useGameStore((state) => state.personalAccountSleeves);
+  const personalSleeveCashBalances = useGameStore((state) => state.personalSleeveCashBalances);
   const personalHoldings = useGameStore((state) => state.personalHoldings);
+  const personalHoldingAccountMap = useGameStore((state) => state.personalHoldingAccountMap);
   const personalShortHoldings = useGameStore((state) => state.personalShortHoldings);
+  const personalShortHoldingAccountMap = useGameStore((state) => state.personalShortHoldingAccountMap);
   const personalMarginDebt = useGameStore((state) => state.personalMarginDebt);
   const personalMarginCall = useGameStore((state) => state.personalMarginCall);
   const tickers = useGameStore((state) => state.tickers);
   const cycleNumber = useGameStore((state) => state.cycleNumber);
   const startInsuranceRecommendation = useGameStore((state) => state.startInsuranceRecommendation);
   const startRecommendationDialogue = useGameStore((state) => state.startRecommendationDialogue);
+  const startClientReviewMeeting = useGameStore((state) => state.startClientReviewMeeting);
+  const startOperationsWorkflow = useGameStore((state) => state.startOperationsWorkflow);
+  const executeEducationFundingPlan = useGameStore((state) => state.executeEducationFundingPlan);
+  const runTaxManagementAction = useGameStore((state) => state.runTaxManagementAction);
   const deferInsurance = useGameStore((state) => state.deferInsurance);
   const rebalanceActiveClient = useGameStore((state) => state.rebalanceActiveClient);
+  const openPersonalAccount = useGameStore((state) => state.openPersonalAccount);
+  const isPlayerBook = activeClientId === "player";
   const activeClient = useMemo(
     () => clients.find((client) => client.id === activeClientId) ?? null,
     [clients, activeClientId]
@@ -102,6 +127,52 @@ export function PortfolioPanel() {
       };
     });
   }, [activeClient, tickers]);
+  const playerSleeveRows = useMemo(() => {
+    return personalAccountSleeves.map((sleeve) => {
+      const sleeveRows = Object.values(personalHoldings)
+        .filter((holding) => (personalHoldingAccountMap[holding.ticker] ?? personalAccountSleeves[0]?.id) === sleeve.id)
+        .map((holding) => {
+          const ticker = tickers[holding.ticker];
+          const currentPrice = ticker?.price ?? 0;
+          const marketValue = currentPrice * holding.shares;
+          const costBasis = holding.averageCost * holding.shares;
+          const unrealized = marketValue - costBasis;
+
+          return {
+            key: `player-${sleeve.id}-${holding.ticker}`,
+            ticker: holding.ticker,
+            name: ticker?.name ?? holding.ticker,
+            shares: holding.shares,
+            averageCost: holding.averageCost,
+            currentPrice,
+            marketValue,
+            unrealized,
+            beta: ticker?.beta ?? 0,
+            category: ticker?.category ?? "stocks",
+            creditRating: ticker?.creditRating ?? null,
+            duration: ticker?.modifiedDuration ?? null
+          };
+        });
+
+      const sleeveMarketValue = sleeveRows.reduce((sum, row) => sum + row.marketValue, 0);
+      const sleeveShortValue = Object.values(personalShortHoldings)
+        .filter((holding) => (personalShortHoldingAccountMap[holding.ticker] ?? personalAccountSleeves[0]?.id) === sleeve.id)
+        .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+      const sleeveUnrealized = sleeveRows.reduce((sum, row) => sum + row.unrealized, 0);
+      const sleeveCash = personalSleeveCashBalances[sleeve.id] ?? 0;
+      const sleeveTotal = sleeveCash + sleeveMarketValue - sleeveShortValue;
+
+      return {
+        sleeve,
+        rows: sleeveRows,
+        sleeveCash,
+        sleeveMarketValue,
+        sleeveShortValue,
+        sleeveTotal,
+        sleeveUnrealized
+      };
+    });
+  }, [personalAccountSleeves, personalHoldingAccountMap, personalHoldings, personalShortHoldingAccountMap, personalShortHoldings, personalSleeveCashBalances, tickers]);
   const clientSleeveRows = useMemo(() => {
     if (!activeClient) {
       return [];
@@ -254,9 +325,25 @@ export function PortfolioPanel() {
     () => activeClient && clientTaxSnapshot ? buildAdvancedTaxPlanningSnapshot(activeClient, clientTaxSnapshot) : null,
     [activeClient, clientTaxSnapshot]
   );
+  const taxManagementSnapshot = useMemo(
+    () => activeClient ? buildTaxManagementSnapshot(activeClient, tickers) : null,
+    [activeClient, tickers]
+  );
   const retirementMathSnapshot = useMemo(
     () => activeClient ? buildRetirementMathSnapshot(activeClient, activeClientUsd) : null,
     [activeClient, activeClientUsd]
+  );
+  const socialSecuritySnapshot = useMemo(
+    () => activeClient ? buildSocialSecurityCalculator(activeClient) : null,
+    [activeClient]
+  );
+  const crmCadence = useMemo(
+    () => activeClient ? crmCadenceLabel(cycleNumber, activeClient.id) : null,
+    [activeClient, cycleNumber]
+  );
+  const activeTraditionalIraSleeve = useMemo(
+    () => activeClient?.accountSleeves.find((sleeve) => sleeve.registration.includes("Traditional IRA")) ?? null,
+    [activeClient]
   );
   const recommendationCards = useMemo(
     () => activeClient ? buildRecommendationCards(activeClient) : [],
@@ -266,66 +353,116 @@ export function PortfolioPanel() {
     () => activeClient ? buildPortfolioAnalyticsSnapshot(activeClient, tickers) : null,
     [activeClient, tickers]
   );
+  const missingPlayerAccounts = useMemo(
+    () => [
+      { id: "401k" as const, label: "Open 401(k)" },
+      { id: "traditional-ira" as const, label: "Open Traditional IRA" },
+      { id: "roth-ira" as const, label: "Open Roth IRA" }
+    ].filter((option) => !personalAccountSleeves.some((sleeve) =>
+      sleeve.id === (option.id === "401k" ? "player-401k" : option.id === "traditional-ira" ? "player-traditional-ira" : "player-roth-ira")
+    )),
+    [personalAccountSleeves]
+  );
 
   return (
     <div className="side-panel portfolio-panel">
-      <div className="portfolio-summary-grid">
-        <div className="portfolio-summary-card">
-          <span>Player Cash</span>
-          <strong>{formatCurrency(personalPortfolioUsd)}</strong>
-          <small>{Object.keys(personalHoldings).length} long | {Object.keys(personalShortHoldings).length} short</small>
-        </div>
-        <div className="portfolio-summary-card">
-          <span>Player Beta</span>
-          <strong>{playerBeta.toFixed(2)}</strong>
-          <small className={playerUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(playerUnrealized)} unrealized</small>
-        </div>
-        <div className="portfolio-summary-card">
-          <span>{activeClient ? `${activeClient.name.split(" ")[0]} Beta` : "Margin / Equity"}</span>
-          <strong>{activeClient ? clientBeta.toFixed(2) : formatCurrency(personalMarginDebt)}</strong>
-          <small className={activeClient ? "client-card-trust" : personalMarginCall ? "down" : "client-card-trust"}>
-            {activeClient
-              ? `${betaFitLabel(clientBeta, activeClient.riskProfile)} | target ${betaRangeForRisk(activeClient.riskProfile).label}`
-              : personalMarginCall
-                ? "Margin call active"
-                : `${formatCurrency(playerNetEquity)} equity`}
-          </small>
-        </div>
-      </div>
+      {isPlayerBook ? (
+        <>
+          <div className="portfolio-summary-grid">
+            <div className="portfolio-summary-card">
+              <span>Player Cash</span>
+              <strong>{formatCurrency(personalPortfolioUsd)}</strong>
+              <small>{Object.keys(personalHoldings).length} long | {Object.keys(personalShortHoldings).length} short</small>
+            </div>
+            <div className="portfolio-summary-card">
+              <span>Player Beta</span>
+              <strong>{playerBeta.toFixed(2)}</strong>
+              <small className={playerUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(playerUnrealized)} unrealized</small>
+            </div>
+            <div className="portfolio-summary-card">
+              <span>Margin / Equity</span>
+              <strong>{formatCurrency(playerNetEquity)}</strong>
+              <small className={personalMarginCall ? "down" : "client-card-trust"}>
+                {personalMarginCall ? "Margin call active" : `${formatCurrency(personalMarginDebt)} margin debt`}
+              </small>
+            </div>
+          </div>
 
-      <div className="portfolio-section">
-        <div className="portfolio-section-title">Player Portfolio</div>
-        <div className="portfolio-table">
-          {playerRows.length === 0 ? (
-            <div className="empty-state">No player positions yet. Use the trade ticket to start building your own book.</div>
-          ) : (
-            playerRows.map((row) => (
-              <div className="portfolio-row portfolio-row--stacked" key={row.key}>
-                <strong>{row.ticker}</strong>
-                <span>{row.name}</span>
-                <span>{row.shares} sh</span>
-                <span>Beta {row.beta.toFixed(2)}</span>
-                <span>{formatCurrency(row.averageCost)}</span>
-                <span>{formatCurrency(row.currentPrice)}</span>
-                <span>{formatCurrency(row.marketValue)}</span>
-                <span className={row.unrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(row.unrealized)}</span>
+          <div className="portfolio-section">
+            <div className="portfolio-section-title">Player Portfolio</div>
+            {missingPlayerAccounts.length > 0 ? (
+              <div className="insurance-actions">
+                {missingPlayerAccounts.map((option) => (
+                  <button key={option.id} className="control-btn" type="button" onClick={() => openPersonalAccount(option.id)}>
+                    {option.label}
+                  </button>
+                ))}
               </div>
-            ))
-          )}
-        </div>
-      </div>
+            ) : null}
+            <div className="portfolio-table">
+              {playerSleeveRows.map(({ sleeve, rows, sleeveCash, sleeveMarketValue, sleeveTotal, sleeveUnrealized }) => (
+                <div className="portfolio-section" key={sleeve.id}>
+                  <div className="portfolio-summary-card">
+                    <span>{sleeve.label}</span>
+                    <strong>{sleeve.registration}</strong>
+                    <small>{sleeve.taxTreatment}{sleeve.beneficiaryRequired ? " | beneficiary tracked" : ""}</small>
+                  </div>
+                  {rows.length === 0 ? (
+                    <div className="empty-state">No positions yet in this sleeve. Route trades here from the ticket to compare how taxable and retirement accounts behave.</div>
+                  ) : (
+                    rows.map((row) => (
+                      <div className="portfolio-row portfolio-row--stacked" key={row.key}>
+                        <strong>{row.ticker}</strong>
+                        <span>{row.name}</span>
+                        <span>{row.shares} sh</span>
+                        <span>{row.category === "bonds" || row.category === "fixedIncome"
+                          ? `${row.creditRating ?? "Unrated"} | Dur ${row.duration?.toFixed(1) ?? "--"}`
+                          : `Beta ${row.beta.toFixed(2)}`}</span>
+                        <span>{formatCurrency(row.averageCost)}</span>
+                        <span>{formatCurrency(row.currentPrice)}</span>
+                        <span>{formatCurrency(row.marketValue)}</span>
+                        <span className={row.unrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(row.unrealized)}</span>
+                      </div>
+                    ))
+                  )}
+                  <div className="portfolio-summary-card">
+                    <span>{sleeve.label} breakdown</span>
+                    <strong>{formatCurrency(sleeveCash)} cash | {formatCurrency(sleeveMarketValue)} invested</strong>
+                    <small className={sleeveUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(sleeveUnrealized)} unrealized | {formatCurrency(sleeveTotal)} total</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
 
+      {activeClient ? (
       <div className="portfolio-section">
+        <div className="portfolio-summary-grid">
+          <div className="portfolio-summary-card">
+            <span>{activeClient.name} USD</span>
+            <strong>{formatCurrency(activeClientUsd)}</strong>
+            <small className={clientUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(clientUnrealized)} unrealized</small>
+          </div>
+          <div className="portfolio-summary-card">
+            <span>{activeClient.name.split(" ")[0]} Beta</span>
+            <strong>{clientBeta.toFixed(2)}</strong>
+            <small className="client-card-trust">{betaFitLabel(clientBeta, activeClient.riskProfile)} | target {betaRangeForRisk(activeClient.riskProfile).label}</small>
+          </div>
+          <div className="portfolio-summary-card">
+            <span>Mandate / Trust</span>
+            <strong>{activeClient.mandateScore}/100 mandate</strong>
+            <small className="client-card-trust">{activeClient.trustScore}/100 trust | {activeClient.goal}</small>
+          </div>
+        </div>
         <div className="portfolio-section-title">{activeClient ? `${activeClient.name} Portfolio` : "Client Portfolio"}</div>
-        {!activeClient ? (
-          <div className="empty-state">Select a client to review that individual portfolio.</div>
-        ) : (
           <div className="portfolio-table">
             {clientSleeveRows.map(({ sleeve, rows, sleeveCash, sleeveMarketValue, sleeveTotal, sleeveUnrealized }) => (
               <div className="portfolio-section" key={sleeve.id}>
                 <div className="portfolio-summary-card">
                   <span>{sleeve.label}</span>
-                  <strong>{sleeve.registration} - {formatCurrency(sleeveTotal)}</strong>
+                  <strong>{sleeve.registration}</strong>
                   <small>{sleeve.taxTreatment}{sleeve.beneficiaryRequired ? " | beneficiary tracked" : ""}</small>
                 </div>
                 {rows.length === 0 ? (
@@ -354,15 +491,8 @@ export function PortfolioPanel() {
               </div>
             ))}
           </div>
-        )}
-        {activeClient ? (
-          <div className="portfolio-summary-card">
-            <span>Selected Client USD</span>
-            <strong>{formatCurrency(activeClientUsd)}</strong>
-            <small className={clientUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(clientUnrealized)} unrealized</small>
-          </div>
-        ) : null}
       </div>
+      ) : null}
 
       {activeClient ? (
         <div className="portfolio-section">
@@ -416,6 +546,40 @@ export function PortfolioPanel() {
               </div>
             </>
           ) : null}
+          {taxManagementSnapshot ? (
+            <>
+              <div className="portfolio-summary-card">
+                <span>Tax management</span>
+                <strong>
+                  {formatCurrency(taxManagementSnapshot.unrealizedLossTotal)} losses | {formatCurrency(taxManagementSnapshot.netTaxableGain)} net gains
+                </strong>
+                <small>{taxManagementSnapshot.summary}</small>
+                <div className="insurance-actions">
+                  <button
+                    className="control-btn"
+                    onClick={() => runTaxManagementAction(activeClient.id, "harvest-losses")}
+                    type="button"
+                  >
+                    Review Harvest Candidates
+                  </button>
+                </div>
+              </div>
+              <div className="portfolio-summary-card">
+                <span>Gain budget</span>
+                <strong>{formatCurrency(taxManagementSnapshot.gainBudgetUsd)} annual room</strong>
+                <small>{taxManagementSnapshot.gainBudgetLabel}</small>
+                <div className="insurance-actions">
+                  <button
+                    className="control-btn"
+                    onClick={() => runTaxManagementAction(activeClient.id, "gain-budget")}
+                    type="button"
+                  >
+                    Review Gain Budget
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
           <div className="portfolio-summary-card">
             <span>Policy statement</span>
             <strong>{activeClient.investmentPolicy.objective}</strong>
@@ -444,6 +608,40 @@ export function PortfolioPanel() {
             <strong>{activeClient.retirementDistribution.withdrawalApproach}</strong>
             <small>{activeClient.retirementDistribution.socialSecurityStrategy} | {activeClient.retirementDistribution.rmdStatus}</small>
           </div>
+          {socialSecuritySnapshot && activeClient.id === "retiree" ? (
+            <div className="portfolio-summary-card">
+              <span>Social Security lens</span>
+              <strong>
+                62 {formatCurrency(socialSecuritySnapshot.age62Annual)} | FRA {formatCurrency(socialSecuritySnapshot.fullRetirementAnnual)} | 70 {formatCurrency(socialSecuritySnapshot.age70Annual)}
+              </strong>
+              <small>{socialSecuritySnapshot.recommendation}</small>
+              <div className="insurance-actions">
+                <button
+                  className="control-btn"
+                  onClick={() => startRecommendationDialogue(activeClient.id, "social-security-timing")}
+                  type="button"
+                >
+                  Present Claiming Review
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {activeTraditionalIraSleeve && activeClient.id === "retiree" ? (
+            <div className="portfolio-summary-card">
+              <span>RMD execution</span>
+              <strong>{activeTraditionalIraSleeve.label}: {formatCurrency(activeClient.sleeveCashBalances[activeTraditionalIraSleeve.id] ?? 0)}</strong>
+              <small>Coordinate required distributions into the taxable reserve sleeve instead of pulling against the whole household bucket.</small>
+              <div className="insurance-actions">
+                <button
+                  className="control-btn"
+                  onClick={() => startOperationsWorkflow(activeClient.id, "rmd")}
+                  type="button"
+                >
+                  Run RMD Workflow
+                </button>
+              </div>
+            </div>
+          ) : null}
           {retirementIncomeSnapshot?.applicable ? (
             <div className="portfolio-summary-card">
               <span>{retirementIncomeSnapshot.mode === "spending-rule" ? "Spending rule pressure" : "Retirement income pressure"}</span>
@@ -528,6 +726,15 @@ export function PortfolioPanel() {
                 <span>Education action</span>
                 <strong>{activeClient.educationPlanning.fundingPriority}</strong>
                 <small>{activeClient.educationPlanning.planningNote}</small>
+                <div className="insurance-actions">
+                  <button
+                    className="control-btn"
+                    onClick={() => executeEducationFundingPlan(activeClient.id)}
+                    type="button"
+                  >
+                    Fund 529 Sleeve
+                  </button>
+                </div>
               </div>
             </>
           ) : null}
@@ -550,12 +757,21 @@ export function PortfolioPanel() {
               <div className="portfolio-summary-card">
                 <span>CRM workflow</span>
                 <strong>{crmSnapshot.serviceModel}</strong>
-                <small>{crmSnapshot.nextReviewWindow} | {crmSnapshot.nextTask}</small>
+                <small>{crmSnapshot.nextReviewWindow} | {crmCadence ?? "Cadence active"}</small>
+                <div className="insurance-actions">
+                  <button
+                    className="control-btn"
+                    onClick={() => startClientReviewMeeting(activeClient.id)}
+                    type="button"
+                  >
+                    Open Review Meeting
+                  </button>
+                </div>
               </div>
               <div className="portfolio-summary-card">
                 <span>Relationship note</span>
-                <strong>{crmSnapshot.relationshipNote}</strong>
-                <small>Use this to frame follow-up, client experience, and future planning cadence.</small>
+                <strong>{crmSnapshot.nextTask}</strong>
+                <small>{crmSnapshot.relationshipNote} Use this to frame follow-up, client experience, and future planning cadence.</small>
               </div>
             </>
           ) : null}

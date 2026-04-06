@@ -35,6 +35,12 @@ export function buildRecommendationCards(client: ClientAccount): RecommendationC
     case "retiree":
       return [
         {
+          id: "social-security-timing",
+          title: "Review Social Security timing",
+          summary: "Walk through how earlier versus later claiming changes guaranteed income and portfolio withdrawal pressure.",
+          followUpTask: "Compare filing-age tradeoffs against the reserve and withdrawal plan."
+        },
+        {
           id: "income-balance",
           title: "Stabilize the income sleeve",
           summary: "Shift the retiree toward a steadier bond-and-income mix instead of letting the equity sleeve do all the work.",
@@ -120,6 +126,42 @@ export function getRecommendationDialogue(
   const advanced = difficulty === "advisor" || difficulty === "senior";
 
   switch (recommendationId) {
+    case "social-security-timing":
+      return buildDialogue(
+        client,
+        recommendationId,
+        "Social Security timing recommendation",
+        "You are recommending a Social Security timing review so the client can see how guaranteed income changes the withdrawal burden on the portfolio.",
+        advanced
+          ? "If I can afford to wait, why does the exact claiming date still matter to the investment plan?"
+          : "Why does when I claim Social Security matter so much?",
+        [
+          {
+            id: "good",
+            label: "Because each claiming age changes how much guaranteed income the portfolio has to replace, which affects withdrawal pressure and flexibility later.",
+            outcome: "The client understood that claiming is not just a benefits decision; it changes the whole income plan.",
+            trustDelta: 6,
+            followUpTask: "Document the claiming-age comparison and how it changes withdrawal pressure.",
+            accepted: true
+          },
+          {
+            id: "middle",
+            label: "Because waiting usually gives a higher check, so it is often the safer choice.",
+            outcome: "The client heard the point, but wanted a clearer explanation of how the portfolio fits into the decision.",
+            trustDelta: 1,
+            followUpTask: "Clarify guaranteed-income tradeoffs versus liquidity needs.",
+            accepted: false
+          },
+          {
+            id: "bad",
+            label: "Because claiming early is generally the wrong choice for retirees.",
+            outcome: "The client felt the answer was too absolute and not tailored to the actual plan.",
+            trustDelta: -4,
+            followUpTask: "Repair trust with a client-specific income-planning explanation.",
+            accepted: false
+          }
+        ]
+      );
     case "income-balance":
       return buildDialogue(
         client,

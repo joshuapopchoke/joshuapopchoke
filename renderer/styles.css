@@ -20,6 +20,185 @@
 body { margin: 0; color: var(--text); min-height: 100vh; overflow: hidden; }
 #root { height: 100vh; }
 
+.auth-shell,
+.manager-shell {
+  min-height: 100vh;
+  padding: 18px;
+  display: grid;
+  background:
+    radial-gradient(circle at top left, rgba(240, 180, 41, 0.14), transparent 30%),
+    linear-gradient(160deg, #07121e 0%, #081a2c 55%, #040b13 100%);
+}
+
+.auth-shell {
+  place-items: center;
+}
+
+.auth-card,
+.manager-topbar,
+.manager-panel,
+.manager-password-panel {
+  background: rgba(9, 19, 31, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.auth-card {
+  width: min(880px, 100%);
+  padding: 28px;
+  display: grid;
+  gap: 22px;
+}
+
+.auth-header,
+.manager-brand {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-subtitle,
+.manager-subtitle {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  max-width: 720px;
+}
+
+.auth-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auth-copy-card {
+  border: 1px solid rgba(37, 66, 95, 0.8);
+  border-radius: 16px;
+  background: rgba(16, 34, 52, 0.58);
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.auth-copy-card span {
+  color: var(--accent);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.auth-copy-card strong {
+  font-size: 1rem;
+}
+
+.auth-copy-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 82, 82, 0.42);
+  background: rgba(255, 82, 82, 0.08);
+  color: #ff9d9d;
+  font-size: 0.76rem;
+}
+
+.auth-submit,
+.manager-inline-btn {
+  margin: 0;
+}
+
+.manager-shell {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.manager-topbar {
+  padding: 18px 20px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.manager-topbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.manager-badge {
+  min-width: 140px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(37, 66, 95, 0.8);
+  background: rgba(16, 34, 52, 0.58);
+  display: grid;
+  gap: 4px;
+}
+
+.manager-badge span {
+  color: var(--muted);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.manager-password-panel,
+.manager-panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.manager-password-grid,
+.manager-panel-body {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.manager-password-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
+.manager-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(0, 1.25fr);
+  gap: 14px;
+}
+
+.manager-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.manager-employee-list,
+.manager-report-list {
+  display: grid;
+  gap: 10px;
+}
+
+.manager-employee-card {
+  align-items: flex-start;
+}
+
+.manager-report-card {
+  padding: 12px 14px;
+}
+
 .layout {
   height: 100vh;
   padding: 10px;
@@ -921,6 +1100,28 @@ textarea.documentation-textarea {
   max-height: min(92vh, 1100px);
   overflow: auto;
 }
+.training-manager-card {
+  width: min(1180px, 100%);
+}
+.training-manager-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  gap: 16px;
+}
+.training-manager-column {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.training-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.trainee-card.active {
+  border-color: rgba(240, 180, 41, 0.55);
+  box-shadow: 0 0 0 1px rgba(240, 180, 41, 0.16) inset;
+}
 .overlay-header {
   display: flex;
   justify-content: space-between;
@@ -941,6 +1142,13 @@ textarea.documentation-textarea {
 @media (max-width: 1200px) {
   body { overflow: auto; }
   #root, .layout { height: auto; min-height: 100vh; }
+  .auth-copy { grid-template-columns: 1fr; }
+  .manager-topbar {
+    flex-direction: column;
+  }
+  .manager-grid { grid-template-columns: 1fr; }
+  .manager-form-grid,
+  .manager-password-grid { grid-template-columns: 1fr; }
   .main-grid { grid-template-columns: 1fr; }
   .center-column { grid-template-rows: auto; }
   .topbar { grid-template-columns: 1fr; }
@@ -950,6 +1158,7 @@ textarea.documentation-textarea {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     overflow: visible;
   }
+  .training-manager-grid { grid-template-columns: 1fr; }
   .ribbon-item {
     width: auto;
   }

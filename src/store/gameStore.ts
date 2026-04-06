@@ -3,18 +3,20 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { getAccountTransferRequest } from "../data/accountTransferRequests";
 import { CLIENTS } from "../data/clients";
 import { getBehaviorScenario } from "../data/clientBehaviorEvents";
-import { getClientMeetingScenario } from "../data/clientMeetings";
+import { getClientMeetingScenario, getClientReviewMeetingScenario } from "../data/clientMeetings";
 import { getInsuranceDialogue } from "../data/insuranceDialogues";
 import { INSURANCE_PRODUCTS } from "../data/insuranceProducts";
 import { buildSupervisionRequest } from "../data/supervisionRequests";
 import { advanceTradingDate, createInitialMarketDate, deriveMarketDateTime, hasAdvancedMarketStep, parseMarketDate } from "../engine/marketClock";
 import { createMarketEngine } from "../engine/marketEngine";
-import { getOperationsRequest } from "../data/operationsRequests";
+import { getOperationsRequest, getOperationsRequestByKind } from "../data/operationsRequests";
 import { betaRangeForRisk, calculatePortfolioBeta } from "../engine/portfolioAnalytics";
 import { getRecommendationDialogue } from "../engine/recommendationEngine";
 import { buildRevenueSnapshot } from "../engine/revenueEngine";
 import { buildInterestRateSnapshot, refreshCallableBondTerms } from "../engine/rateEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
+import { buildTaxManagementSnapshot } from "../engine/taxManagementEngine";
+import { buildTrainingPerformanceSummary } from "../engine/trainingScoreEngine";
 import { createInsiderInfoEvent, evaluateInsiderDecision } from "../engine/playerComplianceEngine";
 import { applyClientRebalance } from "../engine/rebalancingEngine";
 import { applyScrutinyLevel, evaluateTradeSuitability, resolveAuditScrutiny } from "../engine/complianceEngine";
@@ -35,6 +37,7 @@ import type {
   ClientMeetingState,
   DocumentationPromptState,
   GameStateShape,
+  OperationsWorkflowKind,
   OperationsRequestState,
   PlayDifficulty,
   QuestionBankStatus,
@@ -42,15 +45,49 @@ import type {
   RecommendationDialogueState,
   SaveSlotId,
   SaveSlotSummary,
+  TrainingSessionReport,
   SupervisionRequestState,
+  TraineeProfile,
   TradeFundingMode
 } from "../types/gameState";
-import type { ClientAccount, ClientHolding, ClientStatus } from "../types/client";
+import type { ClientAccount, ClientAccountSleeve, ClientHolding, ClientStatus } from "../types/client";
 
 const marketEngine = createMarketEngine();
 const SAVE_SLOT_STORAGE_KEY = "fiduciary-duty-save-slots";
 const SAVE_SLOT_IDS: SaveSlotId[] = ["slot-1", "slot-2", "slot-3", "slot-4", "slot-5", "slot-6"];
 const STARTING_PERSONAL_PORTFOLIO_USD = 100000;
+const DEFAULT_TRAINEE_ID = "trainee-primary";
+const PLAYER_BOOK_ID = "player";
+const PLAYER_TAXABLE_SLEEVE: ClientAccountSleeve = {
+  id: "player-taxable",
+  label: "Taxable Brokerage",
+  registration: "Taxable Brokerage",
+  taxTreatment: "Taxable capital gains and dividends",
+  beneficiaryRequired: false
+};
+const PLAYER_OPTIONAL_SLEEVES: Record<"401k" | "traditional-ira" | "roth-ira", ClientAccountSleeve> = {
+  "401k": {
+    id: "player-401k",
+    label: "401(k)",
+    registration: "401(k)",
+    taxTreatment: "Tax-deferred payroll retirement account",
+    beneficiaryRequired: true
+  },
+  "traditional-ira": {
+    id: "player-traditional-ira",
+    label: "Traditional IRA",
+    registration: "Traditional IRA",
+    taxTreatment: "Tax-deferred retirement account",
+    beneficiaryRequired: true
+  },
+  "roth-ira": {
+    id: "player-roth-ira",
+    label: "Roth IRA",
+    registration: "Roth IRA",
+    taxTreatment: "Tax-free qualified withdrawals",
+    beneficiaryRequired: true
+  }
+};
 
 function formatCurrency(value: number) {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -70,6 +107,52 @@ function cloneClients() {
     insuranceGapScore: client.insuranceGapScore,
     status: "pending" as const
   }));
+}
+
+function createDefaultPersonalAccountSleeves() {
+  return [{ ...PLAYER_TAXABLE_SLEEVE }];
+}
+
+function createDefaultTrainees(): TraineeProfile[] {
+  return [
+    {
+      id: DEFAULT_TRAINEE_ID,
+      name: "Primary Trainee",
+      role: "Trainee",
+      createdAt: Date.now()
+    }
+  ];
+}
+
+function buildSessionReportKey(cycleNumber: number, difficulty: PlayDifficulty, traineeId: string) {
+  return `${traineeId}::${difficulty}::${cycleNumber}`;
+}
+
+function createDefaultPersonalSleeveCashBalances(totalCash = STARTING_PERSONAL_PORTFOLIO_USD) {
+  return {
+    [PLAYER_TAXABLE_SLEEVE.id]: Number(totalCash.toFixed(2))
+  };
+}
+
+function normalizePersonalSleeveCashBalances(
+  sleeves: ClientAccountSleeve[],
+  balances: Record<string, number> | undefined,
+  totalCash: number
+) {
+  const nextBalances = Object.fromEntries(
+    sleeves.map((sleeve) => [sleeve.id, Number((balances?.[sleeve.id] ?? 0).toFixed(2))])
+  ) as Record<string, number>;
+  const currentTotal = sumSleeveCashBalances(nextBalances);
+  const difference = Number((Number(totalCash.toFixed(2)) - currentTotal).toFixed(2));
+  if (Math.abs(difference) > 0.009) {
+    const primarySleeveId = sleeves[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id;
+    nextBalances[primarySleeveId] = Number(((nextBalances[primarySleeveId] ?? 0) + difference).toFixed(2));
+  }
+  return nextBalances;
+}
+
+function personalPrimarySleeveId(sleeves: ClientAccountSleeve[]) {
+  return sleeves[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id;
 }
 
 function sumSleeveCashBalances(balances: Record<string, number>) {
@@ -128,6 +211,52 @@ function setSleeveCashBalance(client: ClientAccount, sleeveId: string, value: nu
 
 function adjustSleeveCashBalance(client: ClientAccount, sleeveId: string, delta: number) {
   return setSleeveCashBalance(client, sleeveId, getSleeveCashBalance(client, sleeveId) + delta);
+}
+
+function transferBetweenSleeves(client: ClientAccount, fromSleeveId: string, toSleeveId: string, amount: number) {
+  const transferAmount = Math.max(0, Number(amount.toFixed(2)));
+  const available = getSleeveCashBalance(client, fromSleeveId);
+  const movedAmount = Math.min(available, transferAmount);
+
+  if (movedAmount <= 0) {
+    return {
+      client,
+      movedAmount: 0
+    };
+  }
+
+  const nextBalances = {
+    ...client.sleeveCashBalances,
+    [fromSleeveId]: Number((available - movedAmount).toFixed(2)),
+    [toSleeveId]: Number((getSleeveCashBalance(client, toSleeveId) + movedAmount).toFixed(2))
+  };
+
+  return {
+    client: {
+      ...client,
+      sleeveCashBalances: nextBalances,
+      cash: sumSleeveCashBalances(nextBalances)
+    },
+    movedAmount
+  };
+}
+
+function findSleeveByRegistrationKeyword(client: ClientAccount, keyword: string) {
+  return client.accountSleeves.find((sleeve) => sleeve.registration.toLowerCase().includes(keyword.toLowerCase())) ?? null;
+}
+
+function buildClientTradeMemo(
+  client: ClientAccount,
+  ticker: string,
+  direction: "buy" | "sell",
+  quantity: number,
+  accountId: string,
+  mode: TradeFundingMode,
+  suitable: boolean,
+  assetName: string
+) {
+  const sleeveLabel = client.accountSleeves.find((sleeve) => sleeve.id === accountId)?.label ?? "selected sleeve";
+  return `${direction === "buy" ? "Recommended purchase" : "Recommended sale"} of ${quantity} ${ticker} (${assetName}) in ${sleeveLabel}${mode === "margin" ? " using margin" : ""}. ${suitable ? "Trade aligned with the current planning objective and account role." : "Trade requires corrective suitability review before it becomes a standing recommendation."}`;
 }
 
 function emptyQuestionState(): ActiveQuestionState {
@@ -471,21 +600,41 @@ function applyOperationsRequestChoice(
   if (!option) {
     return {
       client,
-      feedback: "The service request could not be matched to a valid action."
+      feedback: "The service request could not be matched to a valid action.",
+      movedAmount: 0
     };
   }
 
-  const nextCash = Math.max(0, client.cash + (option.cashDelta ?? 0));
-  const nextClient = updateClientNarrative(
-    setSleeveCashBalance(client, clientPrimarySleeveId(client), nextCash),
-    tickers,
-    option.trustDelta,
-    option.outcome
-  );
+  let nextClient = client;
+  let movedAmount = 0;
+  let sleeveTransferLabel: string | null = null;
+
+  if (option.fromSleeveId && option.toSleeveId && option.transferAmount) {
+    const transferResult = transferBetweenSleeves(client, option.fromSleeveId, option.toSleeveId, option.transferAmount);
+    nextClient = transferResult.client;
+    movedAmount = transferResult.movedAmount;
+    const fromLabel = client.accountSleeves.find((sleeve) => sleeve.id === option.fromSleeveId)?.label ?? option.fromSleeveId;
+    const toLabel = client.accountSleeves.find((sleeve) => sleeve.id === option.toSleeveId)?.label ?? option.toSleeveId;
+    sleeveTransferLabel = `${fromLabel} to ${toLabel}`;
+  }
+
+  if (option.cashDelta) {
+    nextClient = setSleeveCashBalance(
+      nextClient,
+      clientPrimarySleeveId(nextClient),
+      Math.max(0, nextClient.cash + option.cashDelta)
+    );
+  }
+
+  nextClient = updateClientNarrative(nextClient, tickers, option.trustDelta, option.outcome);
 
   return {
     client: nextClient,
-    feedback: option.outcome
+    feedback:
+      movedAmount > 0 && sleeveTransferLabel
+        ? `${option.outcome} ${formatCurrency(movedAmount)} moved from ${sleeveTransferLabel}.`
+        : option.outcome,
+    movedAmount
   };
 }
 
@@ -801,6 +950,23 @@ function buildSuitabilityCoachingBullets(client: ClientAccount, ticker: GameStat
   return bullets;
 }
 
+function workflowCooldownIncrement(
+  eventKind: "meeting" | "behavior" | "transfer" | "operations" | "supervision",
+  difficulty: PlayDifficulty
+) {
+  const difficultyBase =
+    difficulty === "learner" || difficulty === "trainee" ? 3 :
+    difficulty === "associate" ? 2 :
+    2;
+
+  const eventBump =
+    eventKind === "supervision" ? 2 :
+    eventKind === "operations" ? 1 :
+    0;
+
+  return difficultyBase + eventBump;
+}
+
 function paymentsPerYear(frequency: "monthly" | "quarterly" | "semiannual" | "annual" | undefined) {
   switch (frequency) {
     case "monthly":
@@ -891,14 +1057,53 @@ function buildDividendCashBySleeve(
   return cashBySleeve;
 }
 
+function buildPersonalDividendCashBySleeve(
+  holdings: GameState["personalHoldings"],
+  holdingAccountMap: GameState["personalHoldingAccountMap"],
+  sleeves: ClientAccountSleeve[],
+  tickers: GameState["tickers"],
+  cycleNumber: number
+) {
+  const cashBySleeve: Record<string, number> = {};
+  const primarySleeveId = personalPrimarySleeveId(sleeves);
+
+  Object.values(holdings).forEach((holding) => {
+    const ticker = tickers[holding.ticker];
+
+    if (!ticker || ticker.dividendPayoutType !== "cash" || !ticker.dividendYield || !shouldPayDividend(ticker, cycleNumber)) {
+      return;
+    }
+
+    const sleeveId = holdingAccountMap[holding.ticker] ?? primarySleeveId;
+    const payout = holding.shares * ticker.price * (ticker.dividendYield / paymentsPerYear(ticker.dividendFrequency));
+    cashBySleeve[sleeveId] = Number(((cashBySleeve[sleeveId] ?? 0) + payout).toFixed(2));
+  });
+
+  return cashBySleeve;
+}
+
 function applyDividendPayouts(
   clients: ClientAccount[],
   personalCash: number,
+  personalAccountSleeves: ClientAccountSleeve[],
+  personalSleeveCashBalances: Record<string, number>,
   personalHoldings: GameState["personalHoldings"],
+  personalHoldingAccountMap: GameState["personalHoldingAccountMap"],
   tickers: GameState["tickers"],
   cycleNumber: number
 ) {
   const personalPayout = applyDividendPayoutsToHoldings(personalHoldings, tickers, cycleNumber);
+  const personalCashBySleeve = buildPersonalDividendCashBySleeve(
+    personalHoldings,
+    personalHoldingAccountMap,
+    personalAccountSleeves,
+    tickers,
+    cycleNumber
+  );
+  const nextPersonalSleeveCashBalances = { ...personalSleeveCashBalances };
+  Object.entries(personalCashBySleeve).forEach(([sleeveId, amount]) => {
+    nextPersonalSleeveCashBalances[sleeveId] = Number(((nextPersonalSleeveCashBalances[sleeveId] ?? 0) + amount).toFixed(2));
+  });
   const nextClients = clients.map((client) => {
     const payout = applyDividendPayoutsToHoldings(client.holdings, tickers, cycleNumber);
     const cashBySleeve = buildDividendCashBySleeve(client, tickers, cycleNumber);
@@ -922,6 +1127,11 @@ function applyDividendPayouts(
   return {
     clients: nextClients,
     personalPortfolioUsd: Number((personalCash + personalPayout.cashDividendUsd).toFixed(2)),
+    personalSleeveCashBalances: normalizePersonalSleeveCashBalances(
+      personalAccountSleeves,
+      nextPersonalSleeveCashBalances,
+      Number((personalCash + personalPayout.cashDividendUsd).toFixed(2))
+    ),
     personalHoldings: personalPayout.holdings,
     personalCashDividends: personalPayout.cashDividendUsd,
     personalStockDividends: personalPayout.stockDividendShares,
@@ -1139,12 +1349,23 @@ function buildFreshDifficultyState(
     senior: 1000
   };
   const clients = cloneClients();
+  const personalAccountSleeves = createDefaultPersonalAccountSleeves();
+  const personalSleeveCashBalances = createDefaultPersonalSleeveCashBalances();
+  const trainees = createDefaultTrainees();
 
   return {
+    trainees,
+    activeTraineeId: trainees[0].id,
+    trainingReports: [],
+    lastRecordedSessionKey: null,
     score: baseScores[difficulty],
     personalPortfolioUsd: STARTING_PERSONAL_PORTFOLIO_USD,
+    personalAccountSleeves,
+    personalSleeveCashBalances,
     personalHoldings: {},
+    personalHoldingAccountMap: {},
     personalShortHoldings: {},
+    personalShortHoldingAccountMap: {},
     personalMarginDebt: 0,
     personalMarginCall: false,
     playerComplianceLevel: 0,
@@ -1218,12 +1439,22 @@ type GameState = GameStateShape & {
   exportSlots: () => void;
   importSlots: (file: File) => Promise<void>;
   initializeQuestionBank: (difficulty?: PlayDifficulty) => Promise<void>;
+  createTrainee: (name: string, role?: TraineeProfile["role"]) => void;
+  upsertTrainee: (trainee: TraineeProfile) => void;
+  removeTrainee: (traineeId: string) => void;
+  setActiveTrainee: (traineeId: string) => void;
+  recordTrainingReport: () => void;
   setTab: (tab: AppTab) => void;
   selectTicker: (symbol: string) => void;
   selectClient: (clientId: string) => Promise<void>;
+  openPersonalAccount: (accountType: "401k" | "traditional-ira" | "roth-ira") => void;
   answerQuestion: (selectedIndex: number) => void;
   nextQuestion: () => void;
   rebalanceActiveClient: () => void;
+  startClientReviewMeeting: (clientId: string) => void;
+  startOperationsWorkflow: (clientId: string, kind: OperationsWorkflowKind) => void;
+  executeEducationFundingPlan: (clientId: string) => void;
+  runTaxManagementAction: (clientId: string, action: "harvest-losses" | "gain-budget") => void;
   resolveClientMeeting: (optionId: string) => void;
   closeClientMeeting: () => void;
   resolveAccountTransferRequest: (optionId: string) => void;
@@ -1261,10 +1492,18 @@ const DIFFICULTY_ORDER: PlayDifficulty[] = ["learner", "trainee", "associate", "
 
 type PersistedGameSnapshot = Pick<
   GameState,
+  | "trainees"
+  | "activeTraineeId"
+  | "trainingReports"
+  | "lastRecordedSessionKey"
   | "score"
   | "personalPortfolioUsd"
+  | "personalAccountSleeves"
+  | "personalSleeveCashBalances"
   | "personalHoldings"
+  | "personalHoldingAccountMap"
   | "personalShortHoldings"
+  | "personalShortHoldingAccountMap"
   | "personalMarginDebt"
   | "personalMarginCall"
   | "playerComplianceLevel"
@@ -1311,7 +1550,38 @@ type PersistedGameSnapshot = Pick<
   | "totalAum"
   | "onboardingDismissed"
   | "lastSavedAt"
->;
+  >;
+
+function isPersistedGameSnapshot(value: unknown): value is PersistedGameSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const snapshot = value as Partial<PersistedGameSnapshot>;
+  return (
+    typeof snapshot.activeDifficulty === "string" &&
+    typeof snapshot.selectedTicker === "string" &&
+    typeof snapshot.selectedChartPeriod === "string" &&
+    typeof snapshot.gameDateIso === "string" &&
+    snapshot.tickers !== null &&
+    typeof snapshot.tickers === "object" &&
+    snapshot.histories !== null &&
+    typeof snapshot.histories === "object" &&
+    Array.isArray(snapshot.clients)
+  );
+}
+
+function resolveDifficultySessionSnapshot(snapshot: unknown) {
+  if (!isPersistedGameSnapshot(snapshot)) {
+    return null;
+  }
+
+  try {
+    return hydrateSnapshotMarketState(snapshot);
+  } catch {
+    return null;
+  }
+}
 
 function hydrateSnapshotMarketState(snapshot: PersistedGameSnapshot): PersistedGameSnapshot {
   const marketState = mergeMarketState(
@@ -1334,7 +1604,20 @@ function hydrateSnapshotMarketState(snapshot: PersistedGameSnapshot): PersistedG
     workflowCooldownUntilCycle,
     interestRates: buildInterestRateSnapshot(cycleNumber, selectedChartPeriod),
     tickers: hydratedTickers,
+    personalAccountSleeves:
+      Array.isArray(snapshot.personalAccountSleeves) && snapshot.personalAccountSleeves.length > 0
+        ? snapshot.personalAccountSleeves
+        : createDefaultPersonalAccountSleeves(),
+    personalSleeveCashBalances: normalizePersonalSleeveCashBalances(
+      Array.isArray(snapshot.personalAccountSleeves) && snapshot.personalAccountSleeves.length > 0
+        ? snapshot.personalAccountSleeves
+        : createDefaultPersonalAccountSleeves(),
+      snapshot.personalSleeveCashBalances,
+      snapshot.personalPortfolioUsd
+    ),
     personalShortHoldings: snapshot.personalShortHoldings ?? {},
+    personalHoldingAccountMap: snapshot.personalHoldingAccountMap ?? {},
+    personalShortHoldingAccountMap: snapshot.personalShortHoldingAccountMap ?? {},
     personalMarginDebt: snapshot.personalMarginDebt ?? 0,
     personalMarginCall: false,
     clients: sanitizeClients(snapshot.clients, hydratedTickers),
@@ -1436,10 +1719,18 @@ function getWarmupKeys(difficulty: PlayDifficulty) {
 
 function buildSnapshot(state: GameState): PersistedGameSnapshot {
   return {
+    trainees: state.trainees,
+    activeTraineeId: state.activeTraineeId,
+    trainingReports: state.trainingReports,
+    lastRecordedSessionKey: state.lastRecordedSessionKey,
     score: state.score,
     personalPortfolioUsd: state.personalPortfolioUsd,
+    personalAccountSleeves: state.personalAccountSleeves,
+    personalSleeveCashBalances: state.personalSleeveCashBalances,
     personalHoldings: state.personalHoldings,
+    personalHoldingAccountMap: state.personalHoldingAccountMap,
     personalShortHoldings: state.personalShortHoldings,
+    personalShortHoldingAccountMap: state.personalShortHoldingAccountMap,
     personalMarginDebt: state.personalMarginDebt,
     personalMarginCall: state.personalMarginCall,
     playerComplianceLevel: state.playerComplianceLevel,
@@ -1486,6 +1777,49 @@ function buildSnapshot(state: GameState): PersistedGameSnapshot {
     totalAum: state.totalAum,
     onboardingDismissed: state.onboardingDismissed,
     lastSavedAt: state.lastSavedAt
+  };
+}
+
+function buildTrainingSessionReport(state: GameState): TrainingSessionReport {
+  const startingBook = CLIENTS.reduce((total, client) => total + client.startingAum, 0);
+  const correctAnswers = state.questionOutcomes.filter((outcome) => outcome.correct).length;
+  const answeredQuestions = state.questionOutcomes.length;
+  const studyAccuracy = answeredQuestions === 0 ? 0 : (correctAnswers / answeredQuestions) * 100;
+  const trainee = state.trainees.find((entry) => entry.id === state.activeTraineeId) ?? state.trainees[0];
+  const summary = buildTrainingPerformanceSummary({
+    questionOutcomes: state.questionOutcomes,
+    clients: state.clients,
+    removedClientIds: state.removedClientIds,
+    secMeterLevel: state.secMeterLevel,
+    auditHistory: state.auditHistory,
+    complianceStats: state.complianceStats,
+    playerComplianceLevel: state.playerComplianceLevel,
+    totalAum: state.totalAum,
+    startingBook,
+    personalEquity: state.personalPortfolioUsd,
+    startingPersonalEquity: STARTING_PERSONAL_PORTFOLIO_USD
+  });
+
+  return {
+    id: `${Date.now()}-${state.activeDifficulty}`,
+    traineeId: trainee?.id ?? DEFAULT_TRAINEE_ID,
+    traineeName: trainee?.name ?? "Primary Trainee",
+    difficulty: state.activeDifficulty,
+    endedAt: Date.now(),
+    overall: summary.overall,
+    examReadiness: summary.examReadiness,
+    advisorPerformance: summary.advisorPerformance,
+    clientOutcome: summary.clientOutcome,
+    compliance: summary.compliance,
+    portfolioOutcome: summary.portfolioOutcome,
+    finalScore: state.score,
+    totalAum: state.totalAum,
+    personalEquity: state.personalPortfolioUsd,
+    studyAccuracy,
+    correctAnswers,
+    answeredQuestions,
+    clientCount: state.clients.length,
+    lostClientCount: state.removedClientIds.length
   };
 }
 
@@ -1576,35 +1910,46 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       }
     },
     setDifficulty: (difficulty) => {
+      const currentState = get();
+      if (currentState.activeDifficulty === difficulty) {
+        return;
+      }
+
+      const currentSnapshot = buildSnapshot(currentState);
+      const storedTargetSnapshot = resolveDifficultySessionSnapshot(currentState.difficultySessions[difficulty]);
+      const targetState = storedTargetSnapshot
+        ? {
+            ...storedTargetSnapshot,
+            activeDifficulty: difficulty,
+            questionBankStatus: "idle" as QuestionBankStatus,
+            questionBankWarmStatus: "idle" as QuestionBankWarmStatus,
+            loadedQuestionBankKeys: [],
+            questionBankError: null,
+            activeInsiderEvent: null,
+            playerComplianceFeedback: null,
+            activeCycleRecap: null,
+            activeClientMeeting: null,
+            activeAccountTransferRequest: null,
+            activeOperationsRequest: null,
+            activeRecommendationDialogue: null,
+            activeSupervisionRequest: null,
+            activeDocumentationPrompt: null,
+            activeBehaviorEvent: null
+          }
+        : buildFreshDifficultyState(difficulty, currentState.tickers, currentState.histories, currentState.currentEvent);
+
       set((state) => ({
         ...state,
-        ...(
-          (state.difficultySessions[difficulty] as PersistedGameSnapshot | undefined)
-            ? {
-                ...hydrateSnapshotMarketState(state.difficultySessions[difficulty] as PersistedGameSnapshot),
-                activeDifficulty: difficulty,
-                questionBankStatus: "idle" as QuestionBankStatus,
-                questionBankWarmStatus: "idle" as QuestionBankWarmStatus,
-                loadedQuestionBankKeys: [],
-                questionBankError: null,
-                activeInsiderEvent: null,
-                playerComplianceFeedback: null,
-                activeCycleRecap: null,
-                activeClientMeeting: null,
-                activeAccountTransferRequest: null,
-                activeOperationsRequest: null,
-                activeRecommendationDialogue: null,
-                activeSupervisionRequest: null,
-                activeDocumentationPrompt: null,
-                activeBehaviorEvent: null
-              }
-            : buildFreshDifficultyState(difficulty, state.tickers, state.histories, state.currentEvent)
-        ),
+        ...targetState,
+        activeDifficulty: difficulty,
+        lastSavedAt: Date.now(),
         difficultySessions: {
           ...state.difficultySessions,
-          [state.activeDifficulty]: buildSnapshot(state)
+          [state.activeDifficulty]: currentSnapshot
         }
       }));
+
+      void get().initializeQuestionBank(difficulty);
     },
     setChartPeriod: (period) => {
       const state = get();
@@ -1707,7 +2052,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       }
 
       const restoredClients = sanitizeClients(stored.snapshot.clients, stored.snapshot.tickers);
-      const restoredActiveClientId = restoredClients.some((client) => client.id === stored.snapshot.activeClientId)
+      const restoredActiveClientId = stored.snapshot.activeClientId === PLAYER_BOOK_ID
+        ? PLAYER_BOOK_ID
+        : restoredClients.some((client) => client.id === stored.snapshot.activeClientId)
         ? stored.snapshot.activeClientId
         : restoredClients[0]?.id ?? null;
 
@@ -1775,9 +2122,76 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         });
       }
     },
+    createTrainee: (name, role = "Trainee") => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      const trainee: TraineeProfile = {
+        id: `trainee-${Date.now()}`,
+        name: trimmed,
+        role,
+        createdAt: Date.now()
+      };
+
+      commit({
+        trainees: [...get().trainees, trainee],
+        activeTraineeId: trainee.id
+      });
+    },
+    upsertTrainee: (trainee) => {
+      const state = get();
+      const existingIndex = state.trainees.findIndex((entry) => entry.id === trainee.id);
+      const nextTrainees = existingIndex >= 0
+        ? state.trainees.map((entry) => entry.id === trainee.id ? trainee : entry)
+        : [...state.trainees, trainee];
+
+      commit({
+        trainees: nextTrainees
+      });
+    },
+    removeTrainee: (traineeId) => {
+      const state = get();
+      const nextTrainees = state.trainees.filter((entry) => entry.id !== traineeId);
+      const fallbackTrainees = nextTrainees.length > 0 ? nextTrainees : createDefaultTrainees();
+      commit({
+        trainees: fallbackTrainees,
+        activeTraineeId: state.activeTraineeId === traineeId ? fallbackTrainees[0].id : state.activeTraineeId,
+        trainingReports: state.trainingReports.filter((report) => report.traineeId !== traineeId)
+      });
+    },
+    setActiveTrainee: (traineeId) => {
+      if (!get().trainees.some((entry) => entry.id === traineeId)) {
+        return;
+      }
+
+      commit({ activeTraineeId: traineeId }, { touchSave: false });
+    },
+    recordTrainingReport: () => {
+      const state = get();
+      const nextSessionKey = buildSessionReportKey(state.cycleNumber, state.activeDifficulty, state.activeTraineeId);
+      if (state.lastRecordedSessionKey === nextSessionKey) {
+        return;
+      }
+
+      const report = buildTrainingSessionReport(state);
+      commit({
+        trainingReports: [report, ...state.trainingReports].slice(0, 60),
+        lastRecordedSessionKey: nextSessionKey
+      });
+    },
     setTab: (tab) => commit({ activeTab: tab }),
     selectTicker: (symbol) => commit({ selectedTicker: symbol }),
     selectClient: async (clientId) => {
+      if (clientId === PLAYER_BOOK_ID) {
+        commit({
+          activeClientId: PLAYER_BOOK_ID,
+          activeTab: "portfolio"
+        }, { touchSave: false });
+        return;
+      }
+
       const state = get();
       const client = state.clients.find((entry) => entry.id === clientId);
 
@@ -1810,6 +2224,44 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           ...entry,
           status: entry.id === clientId ? "pending" : entry.status
         }))
+      });
+    },
+    openPersonalAccount: (accountType) => {
+      const state = get();
+      const sleeveTemplate = PLAYER_OPTIONAL_SLEEVES[accountType];
+
+      if (state.personalAccountSleeves.some((sleeve) => sleeve.id === sleeveTemplate.id)) {
+        commit({
+          activeClientId: PLAYER_BOOK_ID,
+          activeTab: "portfolio",
+          tradeFeedback: buildTradeFeedback("Account already open", `${sleeveTemplate.label} is already available in your personal book.`, "neutral")
+        });
+        return;
+      }
+
+      const taxableCash = state.personalSleeveCashBalances[PLAYER_TAXABLE_SLEEVE.id] ?? state.personalPortfolioUsd;
+      const seedUsd = Math.min(
+        taxableCash,
+        accountType === "401k" ? 20000 : accountType === "traditional-ira" ? 12000 : 7000
+      );
+      const nextSleeves = [...state.personalAccountSleeves, sleeveTemplate];
+      const nextBalances = {
+        ...state.personalSleeveCashBalances,
+        [PLAYER_TAXABLE_SLEEVE.id]: Number((taxableCash - seedUsd).toFixed(2)),
+        [sleeveTemplate.id]: seedUsd
+      };
+
+      commit({
+        activeClientId: PLAYER_BOOK_ID,
+        activeTab: "portfolio",
+        personalAccountSleeves: nextSleeves,
+        personalSleeveCashBalances: nextBalances,
+        personalPortfolioUsd: sumSleeveCashBalances(nextBalances),
+        tradeFeedback: buildTradeFeedback(
+          `${sleeveTemplate.label} opened`,
+          `${formatCurrency(seedUsd)} moved from Taxable Brokerage into ${sleeveTemplate.label}. Use the account selector to compare tax-deferred and after-tax investing.`,
+          "positive"
+        )
       });
     },
     answerQuestion: (selectedIndex) => {
@@ -1907,6 +2359,161 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         }
       });
     },
+    startClientReviewMeeting: (clientId) => {
+      const state = get();
+      const client = state.clients.find((entry) => entry.id === clientId);
+
+      if (!client) {
+        return;
+      }
+
+      commit({
+        activeClientId: clientId,
+        activeClientMeeting: getClientReviewMeetingScenario(client, state.activeDifficulty, state.cycleNumber),
+        activeAccountTransferRequest: null,
+        activeOperationsRequest: null,
+        activeRecommendationDialogue: null,
+        activeSupervisionRequest: null,
+        activeBehaviorEvent: null
+      }, { touchSave: false });
+    },
+    startOperationsWorkflow: (clientId, kind) => {
+      const state = get();
+      const client = state.clients.find((entry) => entry.id === clientId);
+
+      if (!client) {
+        return;
+      }
+
+      const request = getOperationsRequestByKind(client, state.activeDifficulty, state.cycleNumber, kind);
+      if (!request) {
+        return;
+      }
+
+      commit({
+        activeClientId: clientId,
+        activeClientMeeting: null,
+        activeAccountTransferRequest: null,
+        activeOperationsRequest: request,
+        activeRecommendationDialogue: null,
+        activeSupervisionRequest: null,
+        activeBehaviorEvent: null
+      }, { touchSave: false });
+    },
+    executeEducationFundingPlan: (clientId) => {
+      const state = get();
+      const client = state.clients.find((entry) => entry.id === clientId);
+
+      if (!client || !client.educationPlanning.active) {
+        return;
+      }
+
+      const educationSleeve = findSleeveByRegistrationKeyword(client, "529");
+      const taxableSleeve =
+        client.accountSleeves.find((sleeve) => sleeve.registration.toLowerCase().includes("taxable")) ??
+        client.accountSleeves[0] ??
+        null;
+
+      if (!educationSleeve || !taxableSleeve) {
+        return;
+      }
+
+      const sourceCash = getSleeveCashBalance(client, taxableSleeve.id);
+      const contribution = Math.min(sourceCash, 5000);
+      const transferResult = transferBetweenSleeves(client, taxableSleeve.id, educationSleeve.id, contribution);
+      const updatedClient = appendClientNote(
+        updateClientNarrative(
+          transferResult.client,
+          state.tickers,
+          transferResult.movedAmount > 0 ? 5 : -2,
+          transferResult.movedAmount > 0
+            ? `${client.name.split(" ")[0]} funded the education sleeve without starving the household reserve plan.`
+            : `${client.name.split(" ")[0]} could not fund the education sleeve because taxable liquidity was too thin.`
+        ),
+        transferResult.movedAmount > 0
+          ? `529 funding: moved ${formatCurrency(transferResult.movedAmount)} from ${taxableSleeve.label} to ${educationSleeve.label}.`
+          : "529 funding review: taxable sleeve lacked enough available cash for a planned contribution."
+      );
+      const nextClients = state.clients.map((entry) => (entry.id === clientId ? updatedClient : entry));
+
+      commit({
+        clients: nextClients,
+        totalAum: computeTotalAum(nextClients, state.tickers),
+        tradeFeedback: {
+          ...buildTradeFeedback(
+            transferResult.movedAmount > 0 ? `${client.name} education funding` : `${client.name} education funding paused`,
+            transferResult.movedAmount > 0
+              ? `${formatCurrency(transferResult.movedAmount)} moved into the 529 sleeve for the selected education plan.`
+              : "No education contribution was made because the taxable sleeve does not have enough available liquidity right now.",
+            transferResult.movedAmount > 0 ? "positive" : "warning"
+          ),
+          bullets: [
+            `Source sleeve: ${taxableSleeve.label}`,
+            `Destination sleeve: ${educationSleeve.label}`,
+            `${educationSleeve.label} balance is now ${formatCurrency(getSleeveCashBalance(updatedClient, educationSleeve.id))}.`
+          ]
+        },
+        activeDocumentationPrompt: buildDocumentationPrompt(
+          client.id,
+          `${client.name} education funding note`,
+          "Document the education-planning contribution, why it fit the family timeline, and how the household reserve still supports other goals.",
+          transferResult.movedAmount > 0
+            ? `Moved ${formatCurrency(transferResult.movedAmount)} from ${taxableSleeve.label} to ${educationSleeve.label} to support the education timeline while preserving the broader household plan.`
+            : `Education contribution was reviewed, but taxable liquidity was not strong enough to move funds into ${educationSleeve.label} without pressuring the household reserve.`
+        )
+      });
+    },
+    runTaxManagementAction: (clientId, action) => {
+      const state = get();
+      const client = state.clients.find((entry) => entry.id === clientId);
+
+      if (!client) {
+        return;
+      }
+
+      const snapshot = buildTaxManagementSnapshot(client, state.tickers);
+      const memo =
+        action === "harvest-losses"
+          ? snapshot.harvestCandidates.length > 0
+            ? `Reviewed taxable loss-harvesting candidates for ${client.name}: ${snapshot.harvestCandidates.map((row) => row.ticker).join(", ")}. Any harvest recommendation should still respect replacement exposure and wash-sale limits.`
+            : `Reviewed loss-harvesting opportunities for ${client.name}, but there are no meaningful taxable loss candidates at the moment.`
+          : `Reviewed taxable gain budget for ${client.name}. Net taxable gain is ${formatCurrency(Math.max(0, snapshot.netTaxableGain))} against a working annual budget of ${formatCurrency(snapshot.gainBudgetUsd)}.`;
+      const nextClients = state.clients.map((entry) => (
+        entry.id === clientId
+          ? appendClientNote(updateClientNarrative(entry, state.tickers, 2, memo), memo)
+          : entry
+      ));
+
+      commit({
+        clients: nextClients,
+        totalAum: computeTotalAum(nextClients, state.tickers),
+        tradeFeedback: {
+          ...buildTradeFeedback(
+            action === "harvest-losses" ? `${client.name} tax-loss review` : `${client.name} gain-budget review`,
+            memo,
+            "neutral"
+          ),
+          bullets:
+            action === "harvest-losses"
+              ? snapshot.harvestCandidates.length > 0
+                ? snapshot.harvestCandidates.map((row) => `${row.ticker}: ${formatCurrency(Math.abs(row.unrealized))} unrealized loss`)
+                : ["No significant taxable loss candidates are available right now."]
+              : [
+                  `Taxable unrealized gains: ${formatCurrency(snapshot.unrealizedGainTotal)}`,
+                  `Taxable unrealized losses: ${formatCurrency(snapshot.unrealizedLossTotal)}`,
+                  `Budget status: ${snapshot.gainBudgetLabel}`
+                ]
+        },
+        activeDocumentationPrompt: buildDocumentationPrompt(
+          client.id,
+          `${client.name} tax management memo`,
+          action === "harvest-losses"
+            ? "Document the taxable loss-harvesting review, any replacement-exposure considerations, and whether wash-sale risk was discussed."
+            : "Document the gain-budget review, how much taxable gain room remains, and how future realizations should be paced.",
+          memo
+        )
+      });
+    },
     resolveClientMeeting: (optionId) => {
       const state = get();
       const meeting = state.activeClientMeeting;
@@ -1948,14 +2555,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
               bullets: [
                 `Cash flow now points to ${formatCurrency(projectedIncome)} monthly income and ${formatCurrency(projectedOutflow)} monthly outflow.`,
                 `Liquidity need is now ${chosen.liquidityNeed ?? client.cashFlow.nearTermLiquidityNeed}.`,
-                `Next IPS review focus: ${client.investmentPolicy.nextReviewFocus}`
+                `${meeting.meetingKind === "review" ? "Annual review focus" : "Next IPS review focus"}: ${client.investmentPolicy.nextReviewFocus}`
               ]
             }
           : state.tradeFeedback,
         activeDocumentationPrompt: chosen
           ? buildDocumentationPrompt(
               client.id,
-              `${client.name} meeting note`,
+              `${client.name} ${meeting.meetingKind === "review" ? "review" : "meeting"} note`,
               "Document the planning change and why the guidance fit the client’s household needs.",
               `${chosen.outcome} Planning follow-up should focus on cash flow, liquidity, and the next review checkpoint.`
             )
@@ -2053,15 +2660,24 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             result.feedback,
             (chosen?.trustDelta ?? 0) >= 0 ? "positive" : "warning"
           ),
-          bullets: chosen?.cashDelta
-            ? [`Client cash moved ${chosen.cashDelta >= 0 ? "up" : "down"} by ${formatCurrency(Math.abs(chosen.cashDelta))}`]
+          bullets: chosen
+            ? [
+                ...(chosen.cashDelta
+                  ? [`Client cash moved ${chosen.cashDelta >= 0 ? "up" : "down"} by ${formatCurrency(Math.abs(chosen.cashDelta))}`]
+                  : []),
+                ...(chosen.fromSleeveId && chosen.toSleeveId && chosen.transferAmount
+                  ? [`Sleeve flow: ${client.accountSleeves.find((sleeve) => sleeve.id === chosen.fromSleeveId)?.label ?? "source"} -> ${client.accountSleeves.find((sleeve) => sleeve.id === chosen.toSleeveId)?.label ?? "destination"} | ${formatCurrency(result.movedAmount ?? chosen.transferAmount)}`]
+                  : [])
+              ]
             : []
         },
         activeDocumentationPrompt: chosen
           ? buildDocumentationPrompt(
               client.id,
-              `${client.name} service workflow note`,
-              "Document the maintenance or service request, the action taken, and any follow-up tasks that remain open.",
+              `${client.name} ${request.requestKind === "rmd" ? "distribution" : "service workflow"} note`,
+              request.requestKind === "rmd"
+                ? "Document the retirement distribution amount, source and destination sleeves, withdrawal rationale, and any tax follow-up."
+                : "Document the maintenance or service request, the action taken, and any follow-up tasks that remain open.",
               chosen.noteHint ?? `${result.feedback} Record the operational change, the client request, and the next service checkpoint.`
             )
           : state.activeDocumentationPrompt
@@ -2409,34 +3025,60 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         }
 
         const totalCost = asset.price * quantity;
+        const nextSleeveCashBalances = { ...state.personalSleeveCashBalances };
         const nextHoldings = { ...state.personalHoldings };
+        const nextHoldingAccountMap = { ...state.personalHoldingAccountMap };
         const nextShortHoldings = { ...state.personalShortHoldings };
+        const nextShortHoldingAccountMap = { ...state.personalShortHoldingAccountMap };
         let nextCash = state.personalPortfolioUsd;
+        let nextSleeveCash = nextSleeveCashBalances[accountId] ?? 0;
         let nextDebt = state.personalMarginDebt;
         let detail = "";
+
+        const existingLongAccountId = state.personalHoldingAccountMap[ticker];
+        if (direction === "buy" && existingLongAccountId && existingLongAccountId !== accountId) {
+          commit({
+            tradeFeedback: buildTradeFeedback(
+              "Account sleeve mismatch",
+              `${ticker} already sits in ${state.personalAccountSleeves.find((sleeve) => sleeve.id === existingLongAccountId)?.label ?? "another account sleeve"}. Use that sleeve or open a transfer workflow later before duplicating it elsewhere.`,
+              "warning"
+            )
+          });
+          return;
+        }
 
         const currentLong = nextHoldings[ticker];
         const currentShort = nextShortHoldings[ticker];
 
         if (direction === "buy") {
+          const existingShortAccountId = state.personalShortHoldingAccountMap[ticker];
+          if (currentShort && existingShortAccountId && existingShortAccountId !== accountId) {
+            commit({
+              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} short exposure lives in a different player sleeve. Cover it in that sleeve first.`, "warning")
+            });
+            return;
+          }
           const coverShares = Math.min(quantity, currentShort?.shares ?? 0);
           if (coverShares > 0) {
             const coverCost = coverShares * asset.price;
-            if (mode === "cash" && coverCost > nextCash) {
+            if (mode === "cash" && coverCost > nextSleeveCash) {
               commit({
                 tradeFeedback: buildTradeFeedback("Not enough cash to cover short", `Covering ${coverShares} ${ticker} needs ${formatCurrency(coverCost)}.`, "warning")
               });
               return;
             }
-            if (coverCost > nextCash) {
-              nextDebt += coverCost - nextCash;
-              nextCash = 0;
+            const sleeveCashUsed = Math.min(nextSleeveCash, coverCost);
+            nextSleeveCash -= sleeveCashUsed;
+            nextCash -= sleeveCashUsed;
+            if (coverCost > sleeveCashUsed) {
+              nextDebt += coverCost - sleeveCashUsed;
             } else {
-              nextCash -= coverCost;
+              nextDebt = Number(nextDebt.toFixed(2));
             }
             const remainingShort = (currentShort?.shares ?? 0) - coverShares;
             if (remainingShort <= 0) {
               delete nextShortHoldings[ticker];
+              delete nextShortHoldingAccountMap[ticker];
             } else {
               nextShortHoldings[ticker] = { ...currentShort!, shares: remainingShort };
             }
@@ -2446,9 +3088,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           const buyShares = quantity - coverShares;
           if (buyShares > 0) {
             const buyCost = buyShares * asset.price;
-            if (mode === "cash" && buyCost > nextCash) {
+            if (mode === "cash" && buyCost > nextSleeveCash) {
               commit({
-                tradeFeedback: buildTradeFeedback("Player order rejected", `The order needs ${formatCurrency(buyCost)}, but only ${formatCurrency(nextCash)} cash is available.`, "warning")
+                tradeFeedback: buildTradeFeedback("Player order rejected", `The order needs ${formatCurrency(buyCost)}, but only ${formatCurrency(nextSleeveCash)} is available in that player sleeve.`, "warning")
               });
               return;
             }
@@ -2461,11 +3103,11 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
                 return;
               }
             }
-            if (buyCost > nextCash) {
-              nextDebt += buyCost - nextCash;
-              nextCash = 0;
-            } else {
-              nextCash -= buyCost;
+            const sleeveCashUsed = Math.min(nextSleeveCash, buyCost);
+            nextSleeveCash -= sleeveCashUsed;
+            nextCash -= sleeveCashUsed;
+            if (buyCost > sleeveCashUsed) {
+              nextDebt += buyCost - sleeveCashUsed;
             }
             const previousShares = nextHoldings[ticker]?.shares ?? 0;
             const previousCost = nextHoldings[ticker]?.averageCost ?? asset.price;
@@ -2474,18 +3116,36 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
               shares: previousShares + buyShares,
               averageCost: ((previousShares * previousCost) + buyCost) / Math.max(previousShares + buyShares, 1)
             };
+            nextHoldingAccountMap[ticker] = accountId;
             detail = detail ? `${detail} and bought ${buyShares} long` : `Bought ${buyShares} ${ticker}`;
           }
         } else {
+          const existingLongAccount = state.personalHoldingAccountMap[ticker];
+          if (currentLong && existingLongAccount && existingLongAccount !== accountId) {
+            commit({
+              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} long exposure lives in a different player sleeve. Sell it from that sleeve instead.`, "warning")
+            });
+            return;
+          }
+          const existingShortAccount = state.personalShortHoldingAccountMap[ticker];
+          if (existingShortAccount && existingShortAccount !== accountId) {
+            commit({
+              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} short exposure lives in a different player sleeve. Use that sleeve for the next trade.`, "warning")
+            });
+            return;
+          }
           const sellableLongShares = Math.min(quantity, currentLong?.shares ?? 0);
           if (sellableLongShares > 0) {
             const proceeds = sellableLongShares * asset.price;
-            const applied = applySaleProceedsToDebt(nextCash, nextDebt, proceeds);
-            nextCash = applied.cash;
-            nextDebt = applied.marginDebt;
+            const debtReduction = Math.min(nextDebt, proceeds);
+            nextDebt -= debtReduction;
+            const netCashCredit = proceeds - debtReduction;
+            nextCash += netCashCredit;
+            nextSleeveCash += netCashCredit;
             const remainingLong = (currentLong?.shares ?? 0) - sellableLongShares;
             if (remainingLong <= 0) {
               delete nextHoldings[ticker];
+              delete nextHoldingAccountMap[ticker];
             } else {
               nextHoldings[ticker] = { ...currentLong!, shares: remainingLong };
             }
@@ -2515,21 +3175,31 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
               shares: previousShares + shortShares,
               averageCost: ((previousShares * previousCost) + shortValue) / Math.max(previousShares + shortShares, 1)
             };
+            nextShortHoldingAccountMap[ticker] = accountId;
             nextCash += shortValue;
+            nextSleeveCash += shortValue;
             detail = detail ? `${detail} and sold short ${shortShares}` : `Sold short ${shortShares} ${ticker}`;
           }
         }
 
+        nextSleeveCashBalances[accountId] = Number(nextSleeveCash.toFixed(2));
         const playerMargin = accountMarginRatio(nextCash, nextHoldings, nextShortHoldings, nextDebt, state.tickers);
         commit({
           personalPortfolioUsd: nextCash,
+          personalSleeveCashBalances: normalizePersonalSleeveCashBalances(
+            state.personalAccountSleeves,
+            nextSleeveCashBalances,
+            nextCash
+          ),
           personalHoldings: nextHoldings,
+          personalHoldingAccountMap: nextHoldingAccountMap,
           personalShortHoldings: nextShortHoldings,
+          personalShortHoldingAccountMap: nextShortHoldingAccountMap,
           personalMarginDebt: nextDebt,
           personalMarginCall: playerMargin.exposure > 0 && playerMargin.ratio < getMaintenanceRequirement(state.activeDifficulty),
           tradeFeedback: buildTradeFeedback(
             mode === "margin" ? "Margin order filled" : "Player order filled",
-            `${detail} at ${formatCurrency(totalCost)} notional in the personal book.`,
+            `${detail} at ${formatCurrency(totalCost)} notional in ${state.personalAccountSleeves.find((sleeve) => sleeve.id === accountId)?.label ?? "the personal book"}.`,
             "neutral"
           )
         });
@@ -2739,33 +3409,38 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
               effectiveDecision.suitable ? "positive" : "warning"
             ),
             bullets: effectiveDecision.suitable
-              ? []
+              ? [
+                  `Account sleeve: ${client.accountSleeves.find((sleeve) => sleeve.id === accountId)?.label ?? "Selected sleeve"}`,
+                  `Memo: ${direction === "buy" ? "Build" : "Trim"} ${asset.name} inside the ${client.goal.toLowerCase()} plan with ${mode === "margin" ? "leveraged" : "cash"} funding.`
+                ]
               : [...effectiveDecision.reasons.slice(0, 3), ...buildSuitabilityCoachingBullets(client, asset)]
           },
-          activeDocumentationPrompt: !effectiveDecision.suitable
-            ? buildDocumentationPrompt(
-                client.id,
-                `${client.name} suitability note`,
-                "This trade triggered suitability scrutiny. Document the rationale, the client’s profile, and any corrective action.",
-                `${ticker} was flagged for ${client.name} because ${effectiveDecision.reasons[0] ?? "the trade did not fit the client profile"}. Next step: revisit risk profile, beta exposure, and mandate fit.`
-              )
-            : state.activeDocumentationPrompt
+          activeDocumentationPrompt: buildDocumentationPrompt(
+            client.id,
+            effectiveDecision.suitable ? `${client.name} trade memo` : `${client.name} suitability note`,
+            effectiveDecision.suitable
+              ? "Document the recommendation, the selected sleeve, and why this trade fit the client objective, tax location, and IPS."
+              : "This trade triggered suitability scrutiny. Document the rationale, the client's profile, and any corrective action.",
+            effectiveDecision.suitable
+              ? buildClientTradeMemo(client, ticker, direction, quantity, accountId, mode, true, asset.name)
+              : `${ticker} was flagged for ${client.name} because ${effectiveDecision.reasons[0] ?? "the trade did not fit the client profile"}. Next step: revisit risk profile, beta exposure, and mandate fit.`
+          )
         });
 
-      if (shouldTriggerAudit) {
-        const auditQuestion = pickAuditQuestion(state.questionTracker);
-        const shuffled = shuffleQuestion(auditQuestion);
-        commit({
-          auditTriggered: true,
-          auditQuestion: {
-            question: auditQuestion,
-            shuffledOptions: shuffled.shuffledOptions,
-            displayCorrectIndex: shuffled.displayCorrectIndex,
-            selectedIndex: null,
-            answered: false
-          }
-        });
-      }
+        if (shouldTriggerAudit) {
+          const auditQuestion = pickAuditQuestion(state.questionTracker);
+          const shuffled = shuffleQuestion(auditQuestion);
+          commit({
+            auditTriggered: true,
+            auditQuestion: {
+              question: auditQuestion,
+              shuffledOptions: shuffled.shuffledOptions,
+              displayCorrectIndex: shuffled.displayCorrectIndex,
+              selectedIndex: null,
+              answered: false
+            }
+          });
+        }
     },
     tickMarket: () => {
       if (
@@ -2833,7 +3508,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         const dividendState = applyDividendPayouts(
           state.clients,
           state.personalPortfolioUsd,
+          state.personalAccountSleeves,
+          state.personalSleeveCashBalances,
           state.personalHoldings,
+          state.personalHoldingAccountMap,
           nextMarket.tickers,
           nextCycleNumber
         );
@@ -2893,7 +3571,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           !state.activeInsuranceDialogue &&
           !state.activeInsiderEvent &&
           nextActiveClientId &&
-          Math.random() < 0.24
+          Math.random() < 0.14
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const behaviorCandidate =
@@ -2903,7 +3581,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           !state.activeInsuranceDialogue &&
           !state.activeInsiderEvent &&
           nextActiveClientId &&
-          Math.random() < 0.18
+          Math.random() < 0.12
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const transferCandidate =
@@ -2914,7 +3592,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           !state.activeInsuranceDialogue &&
           !state.activeInsiderEvent &&
           nextActiveClientId &&
-          Math.random() < 0.16
+          Math.random() < 0.1
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const transferRequest = transferCandidate
@@ -2929,7 +3607,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           !state.activeInsuranceDialogue &&
           !state.activeInsiderEvent &&
           nextActiveClientId &&
-          Math.random() < 0.14
+          Math.random() < 0.1
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const operationsRequest = operationsCandidate
@@ -2950,15 +3628,22 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             state.secMeterLevel >= 40 ||
             clientCycleState.updatedClients.some((client) => client.status === "at-risk" && client.id === nextActiveClientId)
           ) &&
-          Math.random() < 0.22
+          Math.random() < 0.16
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const supervisionRequest = supervisionCandidate
           ? buildSupervisionRequest(supervisionCandidate, nextCycleNumber)
           : null;
+        const triggeredWorkflowKind =
+          meetingCandidate ? "meeting" :
+          behaviorCandidate ? "behavior" :
+          transferRequest ? "transfer" :
+          operationsRequest ? "operations" :
+          supervisionRequest ? "supervision" :
+          null;
         const nextWorkflowCooldownUntilCycle =
-          meetingCandidate || behaviorCandidate || transferRequest || operationsRequest || supervisionRequest
-            ? nextCycleNumber + 1
+          triggeredWorkflowKind
+            ? nextCycleNumber + workflowCooldownIncrement(triggeredWorkflowKind, state.activeDifficulty)
             : state.workflowCooldownUntilCycle;
 
         commit((current) => ({
@@ -2978,6 +3663,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           totalAum: nextClientTotal,
           clients: clientCycleState.updatedClients,
           personalPortfolioUsd: playerMarginState.personalPortfolioUsd,
+          personalSleeveCashBalances: dividendState.personalSleeveCashBalances,
           personalHoldings: playerMarginState.personalHoldings,
           personalShortHoldings: playerMarginState.personalShortHoldings,
           personalMarginDebt: playerMarginState.personalMarginDebt,
@@ -3154,7 +3840,18 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.activeSupervisionRequest = null;
     state.activeDocumentationPrompt = null;
     state.activeBehaviorEvent = null;
+    state.personalAccountSleeves =
+      Array.isArray(state.personalAccountSleeves) && state.personalAccountSleeves.length > 0
+        ? state.personalAccountSleeves
+        : createDefaultPersonalAccountSleeves();
+    state.personalHoldingAccountMap = state.personalHoldingAccountMap ?? {};
     state.personalShortHoldings = state.personalShortHoldings ?? {};
+    state.personalShortHoldingAccountMap = state.personalShortHoldingAccountMap ?? {};
+    state.personalSleeveCashBalances = normalizePersonalSleeveCashBalances(
+      state.personalAccountSleeves,
+      state.personalSleeveCashBalances,
+      state.personalPortfolioUsd
+    );
     state.personalMarginDebt = state.personalMarginDebt ?? 0;
     state.personalMarginCall = false;
     state.tickers = refreshCallableBondTerms(marketState.tickers, Math.max(1, state.cycleNumber ?? 1));
@@ -3162,7 +3859,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.currentEvent = marketState.currentEvent;
     state.selectedTicker = marketState.selectedTicker;
     state.clients = sanitizeClients(state.clients, state.tickers);
-    if (!state.clients.some((client) => client.id === state.activeClientId)) {
+    if (state.activeClientId !== PLAYER_BOOK_ID && !state.clients.some((client) => client.id === state.activeClientId)) {
       state.activeClientId = state.clients[0]?.id ?? null;
     }
     state.financialProfiles = buildFinancialProfiles(state.tickers);
@@ -3177,6 +3874,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.lastCycleSummary = buildCycleSummary(state.tickers, state.cycleNumber, state.currentEvent);
     state.activeCycleRecap = null;
     state.workflowCooldownUntilCycle = Math.max(1, state.workflowCooldownUntilCycle ?? 1);
+    state.trainees = Array.isArray(state.trainees) && state.trainees.length > 0 ? state.trainees : createDefaultTrainees();
+    state.activeTraineeId = state.trainees.some((entry) => entry.id === state.activeTraineeId) ? state.activeTraineeId : state.trainees[0].id;
+    state.trainingReports = Array.isArray(state.trainingReports) ? state.trainingReports : [];
+    state.lastRecordedSessionKey = state.lastRecordedSessionKey ?? null;
     state.difficultySessions = state.difficultySessions ?? {};
     state.questionTracker = {
       recentlyAsked: state.questionTracker?.recentlyAsked ?? [],
@@ -3186,20 +3887,28 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     };
     state.onboardingDismissed = state.onboardingDismissed ?? false;
     state.difficultySessions = Object.fromEntries(
-      Object.entries(state.difficultySessions ?? {}).map(([difficulty, snapshot]) => [
-        difficulty,
-        hydrateSnapshotMarketState(snapshot as PersistedGameSnapshot)
-      ])
+      Object.entries(state.difficultySessions ?? {}).flatMap(([difficulty, snapshot]) => {
+        const resolved = resolveDifficultySessionSnapshot(snapshot);
+        return resolved ? [[difficulty, resolved]] : [];
+      })
     );
     state.lastRestoredAt = Date.now();
     state.sessionRestored = true;
     state.saveSlots = buildSaveSlotSummaries();
   },
   partialize: (state) => ({
+    trainees: state.trainees,
+    activeTraineeId: state.activeTraineeId,
+    trainingReports: state.trainingReports,
+    lastRecordedSessionKey: state.lastRecordedSessionKey,
     score: state.score,
     personalPortfolioUsd: state.personalPortfolioUsd,
+    personalAccountSleeves: state.personalAccountSleeves,
+    personalSleeveCashBalances: state.personalSleeveCashBalances,
     personalHoldings: state.personalHoldings,
+    personalHoldingAccountMap: state.personalHoldingAccountMap,
     personalShortHoldings: state.personalShortHoldings,
+    personalShortHoldingAccountMap: state.personalShortHoldingAccountMap,
     personalMarginDebt: state.personalMarginDebt,
     personalMarginCall: state.personalMarginCall,
     playerComplianceLevel: state.playerComplianceLevel,

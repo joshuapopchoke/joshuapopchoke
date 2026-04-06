@@ -17,7 +17,9 @@ export function OperationsRequestOverlay() {
       <div className="overlay-card">
         <p className="eyebrow">Operations Workflow</p>
         <h2>{request.title}</h2>
-        <p className="panel-meta">{client ? client.name : "Client"} | Service and maintenance request</p>
+        <p className="panel-meta">
+          {client ? client.name : "Client"} | {request.requestKind === "rmd" ? "Retirement distribution workflow" : "Service and maintenance request"}
+        </p>
         {!request.resolved ? (
           <>
             <p>{request.summary}</p>
@@ -45,7 +47,9 @@ export function OperationsRequestOverlay() {
             <div className="answer-summary positive">
               <strong>{request.feedback ?? "Operations request resolved."}</strong>
               <span>
-                The client file now reflects the service decision, and any follow-up note can be saved from the documentation prompt.
+                {request.requestKind === "rmd"
+                  ? "The distribution workflow and sleeve movement are now reflected in the client file and taxable reserve planning."
+                  : "The client file now reflects the service decision, and any follow-up note can be saved from the documentation prompt."}
               </span>
             </div>
             <div className="overlay-actions">

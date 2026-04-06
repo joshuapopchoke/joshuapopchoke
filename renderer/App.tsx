@@ -1,93 +1,107 @@
-import { Suspense, lazy, useEffect } from "react";
-import { ClientRoster } from "../src/components/ClientRoster";
-import { MarketChart } from "../src/components/MarketChart";
-import { OrderEntry } from "../src/components/OrderEntry";
-import { QuestionPanel } from "../src/components/QuestionPanel";
-import { StudyDashboard } from "../src/components/StudyDashboard";
-import { TopBar } from "../src/components/TopBar";
+import { useMemo, useState } from "react";
+import { EmployeeAppView } from "../src/components/EmployeeAppView";
+import { LoginScreen } from "../src/components/LoginScreen";
+import { ManagerDashboard } from "../src/components/ManagerDashboard";
+import { authenticateMockUser, changeUserPassword, createEmployeeUser, loadMockUsers, removeEmployeeUser, saveMockUsers } from "../src/engine/mockAuthEngine";
 import { useGameStore } from "../src/store/gameStore";
+import type { AuthSession, User } from "../src/types/auth";
+import type { TraineeProfile } from "../src/types/gameState";
 
-const AuditOverlay = lazy(() => import("../src/components/AuditOverlay").then((module) => ({ default: module.AuditOverlay })));
-const AccountTransferOverlay = lazy(() => import("../src/components/AccountTransferOverlay").then((module) => ({ default: module.AccountTransferOverlay })));
-const BehaviorEventOverlay = lazy(() => import("../src/components/BehaviorEventOverlay").then((module) => ({ default: module.BehaviorEventOverlay })));
-const ClientMeetingOverlay = lazy(() => import("../src/components/ClientMeetingOverlay").then((module) => ({ default: module.ClientMeetingOverlay })));
-const CycleRecapOverlay = lazy(() => import("../src/components/CycleRecapOverlay").then((module) => ({ default: module.CycleRecapOverlay })));
-const DocumentationOverlay = lazy(() => import("../src/components/DocumentationOverlay").then((module) => ({ default: module.DocumentationOverlay })));
-const InsuranceDialogueOverlay = lazy(() => import("../src/components/InsuranceDialogueOverlay").then((module) => ({ default: module.InsuranceDialogueOverlay })));
-const OnboardingOverlay = lazy(() => import("../src/components/OnboardingOverlay").then((module) => ({ default: module.OnboardingOverlay })));
-const OperationsRequestOverlay = lazy(() => import("../src/components/OperationsRequestOverlay").then((module) => ({ default: module.OperationsRequestOverlay })));
-const PortfolioPanel = lazy(() => import("../src/components/PortfolioPanel").then((module) => ({ default: module.PortfolioPanel })));
-const PlayerComplianceOverlay = lazy(() => import("../src/components/PlayerComplianceOverlay").then((module) => ({ default: module.PlayerComplianceOverlay })));
-const RecommendationDialogueOverlay = lazy(() => import("../src/components/RecommendationDialogueOverlay").then((module) => ({ default: module.RecommendationDialogueOverlay })));
-const ResearchTerminal = lazy(() => import("../src/components/ResearchTerminal").then((module) => ({ default: module.ResearchTerminal })));
-const SessionEndScreen = lazy(() => import("../src/components/SessionEndScreen").then((module) => ({ default: module.SessionEndScreen })));
-const SupervisionRequestOverlay = lazy(() => import("../src/components/SupervisionRequestOverlay").then((module) => ({ default: module.SupervisionRequestOverlay })));
+function buildTraineeProfile(user: User): TraineeProfile {
+  return {
+    id: user.id,
+    name: user.displayName,
+    role: user.role === "manager" ? "Manager" : "Trainee",
+    createdAt: user.createdAt
+  };
+}
 
 export default function App() {
-  const activeTab = useGameStore((state) => state.activeTab);
-  const activeDifficulty = useGameStore((state) => state.activeDifficulty);
-  const setTab = useGameStore((state) => state.setTab);
-  const tickTimer = useGameStore((state) => state.tickTimer);
-  const initializeQuestionBank = useGameStore((state) => state.initializeQuestionBank);
+  const [users, setUsers] = useState<User[]>(() => loadMockUsers());
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const upsertTrainee = useGameStore((state) => state.upsertTrainee);
+  const removeTrainee = useGameStore((state) => state.removeTrainee);
+  const setActiveTrainee = useGameStore((state) => state.setActiveTrainee);
 
-  useEffect(() => {
-    void initializeQuestionBank(activeDifficulty);
-  }, [activeDifficulty, initializeQuestionBank]);
+  const managerUser = useMemo(() => users.find((user) => user.role === "manager") ?? null, [users]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => tickTimer(), 1000);
+  const handleLogin = (username: string, password: string) => {
+    const nextSession = authenticateMockUser(users, username, password);
+    if (!nextSession) {
+      setAuthError("Invalid username or password.");
+      return;
+    }
 
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [tickTimer]);
+    setAuthError(null);
+    setSession(nextSession);
 
-  return (
-    <main className="layout">
-      <TopBar />
-      <div className="main-grid">
-        <ClientRoster />
-        <div className="center-column">
-          <MarketChart />
-          <QuestionPanel />
-          <StudyDashboard />
-          <OrderEntry />
-        </div>
-        <section className="panel side-shell">
-          <div className="panel-header tabs">
-            <div className="side-panel-heading">
-              <h2>{activeTab === "research" ? "Research Terminal" : "Portfolio Book"}</h2>
-              <span className="panel-meta">{activeTab === "research" ? "Live quote context" : "Player and client holdings"}</span>
-            </div>
-            <div className="tabs">
-              <button className={activeTab === "research" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("research")}>
-              Research
-              </button>
-              <button className={activeTab === "portfolio" ? "tab-btn active" : "tab-btn"} onClick={() => setTab("portfolio")}>
-              Portfolio
-              </button>
-            </div>
-          </div>
-          <Suspense fallback={<div className="empty-state">Loading panel…</div>}>
-            {activeTab === "research" ? <ResearchTerminal /> : <PortfolioPanel />}
-          </Suspense>
-        </section>
-      </div>
-      <Suspense fallback={null}>
-        <AuditOverlay />
-        <AccountTransferOverlay />
-        <BehaviorEventOverlay />
-        <ClientMeetingOverlay />
-        <CycleRecapOverlay />
-        <DocumentationOverlay />
-        <InsuranceDialogueOverlay />
-        <OnboardingOverlay />
-        <OperationsRequestOverlay />
-        <PlayerComplianceOverlay />
-        <RecommendationDialogueOverlay />
-        <SessionEndScreen />
-        <SupervisionRequestOverlay />
-      </Suspense>
-    </main>
-  );
+    if (nextSession.role === "employee") {
+      const traineeUser = users.find((user) => user.id === nextSession.userId);
+      if (traineeUser) {
+        upsertTrainee(buildTraineeProfile(traineeUser));
+        setActiveTrainee(traineeUser.id);
+      }
+    }
+  };
+
+  const handleLogout = () => {
+    setSession(null);
+    setAuthError(null);
+  };
+
+  const handleAddEmployee = (input: { displayName: string; username: string; password: string }) => {
+    const nextUsers = createEmployeeUser(users, input);
+    const newUser = nextUsers[nextUsers.length - 1];
+    setUsers(nextUsers);
+    saveMockUsers(nextUsers);
+    upsertTrainee(buildTraineeProfile(newUser));
+  };
+
+  const handleRemoveEmployee = (userId: string) => {
+    const nextUsers = removeEmployeeUser(users, userId);
+    setUsers(nextUsers);
+    saveMockUsers(nextUsers);
+    removeTrainee(userId);
+  };
+
+  const handleChangeManagerPassword = (currentPassword: string, nextPassword: string) => {
+    if (!managerUser) {
+      throw new Error("Manager account is unavailable.");
+    }
+
+    const nextUsers = changeUserPassword(users, managerUser.id, nextPassword, currentPassword);
+    setUsers(nextUsers);
+    saveMockUsers(nextUsers);
+    setSession((previous) => previous && previous.userId === managerUser.id
+      ? {
+          ...previous,
+          mustChangePassword: false
+        }
+      : previous);
+  };
+
+  if (!session) {
+    return <LoginScreen error={authError} onLogin={handleLogin} />;
+  }
+
+  if (session.role === "manager") {
+    const currentManager = users.find((user) => user.id === session.userId) ?? managerUser;
+    if (!currentManager) {
+      return <LoginScreen error="Manager account could not be loaded." onLogin={handleLogin} />;
+    }
+
+    return (
+      <ManagerDashboard
+        currentUser={currentManager}
+        users={users}
+        onLogout={handleLogout}
+        onAddEmployee={handleAddEmployee}
+        onRemoveEmployee={handleRemoveEmployee}
+        onChangeManagerPassword={handleChangeManagerPassword}
+      />
+    );
+  }
+
+  return <EmployeeAppView onLogout={handleLogout} />;
 }

@@ -26,9 +26,9 @@ export const CLIENTS: ClientAccount[] = [
       { id: "retiree-roth", label: "Roth IRA", registration: "Roth IRA", taxTreatment: "Tax-free qualified withdrawals", beneficiaryRequired: true }
     ],
     sleeveCashBalances: {
-      "retiree-taxable": 365000,
-      "retiree-trad-ira": 50000,
-      "retiree-roth": 35000
+      "retiree-taxable": 140000,
+      "retiree-trad-ira": 220000,
+      "retiree-roth": 90000
     },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
@@ -161,9 +161,9 @@ export const CLIENTS: ClientAccount[] = [
       { id: "young-taxable", label: "Taxable Brokerage", registration: "Taxable", taxTreatment: "Taxable capital gains and dividends", beneficiaryRequired: false }
     ],
     sleeveCashBalances: {
-      "young-401k": 35000,
-      "young-roth": 15000,
-      "young-taxable": 35000
+      "young-401k": 42000,
+      "young-roth": 18000,
+      "young-taxable": 25000
     },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
@@ -296,9 +296,9 @@ export const CLIENTS: ClientAccount[] = [
       { id: "family-taxable", label: "Taxable Household", registration: "Joint Taxable", taxTreatment: "Taxable household investing", beneficiaryRequired: false }
     ],
     sleeveCashBalances: {
-      "family-529": 60000,
-      "family-401k": 90000,
-      "family-taxable": 70000
+      "family-529": 45000,
+      "family-401k": 120000,
+      "family-taxable": 55000
     },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
@@ -431,9 +431,9 @@ export const CLIENTS: ClientAccount[] = [
       { id: "entrepreneur-trust", label: "Trust / Estate Sleeve", registration: "Trust", taxTreatment: "Trust and legacy planning sleeve", beneficiaryRequired: true }
     ],
     sleeveCashBalances: {
-      "entrepreneur-taxable": 750000,
-      "entrepreneur-retirement": 250000,
-      "entrepreneur-trust": 200000
+      "entrepreneur-taxable": 575000,
+      "entrepreneur-retirement": 325000,
+      "entrepreneur-trust": 300000
     },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},

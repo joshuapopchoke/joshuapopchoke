@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { CLIENTS } from "../data/clients";
 import { EXAM_BLUEPRINTS } from "../data/examBlueprints";
+import { buildTrainingPerformanceSummary } from "../engine/trainingScoreEngine";
 import { useGameStore } from "../store/gameStore";
 import type { DomainBreakdownRow } from "../types/gameState";
 
@@ -88,16 +90,29 @@ export function SessionEndScreen() {
   const secMeterLevel = useGameStore((state) => state.secMeterLevel);
   const auditHistory = useGameStore((state) => state.auditHistory);
   const complianceStats = useGameStore((state) => state.complianceStats);
+  const playerComplianceLevel = useGameStore((state) => state.playerComplianceLevel);
   const questionOutcomes = useGameStore((state) => state.questionOutcomes);
   const bestAnswerStreak = useGameStore((state) => state.bestAnswerStreak);
+  const clients = useGameStore((state) => state.clients);
+  const removedClientIds = useGameStore((state) => state.removedClientIds);
+  const trainees = useGameStore((state) => state.trainees);
+  const activeTraineeId = useGameStore((state) => state.activeTraineeId);
+  const recordTrainingReport = useGameStore((state) => state.recordTrainingReport);
   const resetSession = useGameStore((state) => state.resetSession);
   const [dismissed, setDismissed] = useState(false);
+  const activeTrainee = trainees.find((entry) => entry.id === activeTraineeId) ?? trainees[0] ?? null;
 
   useEffect(() => {
     if (timerSeconds > 0) {
       setDismissed(false);
     }
   }, [timerSeconds]);
+
+  useEffect(() => {
+    if (timerSeconds <= 0 && currentEvent !== null && !dismissed) {
+      recordTrainingReport();
+    }
+  }, [currentEvent, dismissed, recordTrainingReport, timerSeconds]);
 
   if (timerSeconds > 0 || dismissed || currentEvent === null) {
     return null;
@@ -113,6 +128,27 @@ export function SessionEndScreen() {
   );
   const correctAnswers = questionOutcomes.filter((outcome) => outcome.correct).length;
   const accuracy = questionOutcomes.length === 0 ? 0 : (correctAnswers / questionOutcomes.length) * 100;
+  const startingBook = CLIENTS.reduce((total, client) => total + client.startingAum, 0);
+  const trainingSummary = buildTrainingPerformanceSummary({
+    questionOutcomes,
+    clients,
+    removedClientIds,
+    secMeterLevel,
+    auditHistory,
+    complianceStats,
+    playerComplianceLevel,
+    totalAum,
+    startingBook,
+    personalEquity: personalPortfolioUsd,
+    startingPersonalEquity: 100000
+  });
+  const laneRows = [
+    trainingSummary.examReadiness,
+    trainingSummary.advisorPerformance,
+    trainingSummary.clientOutcome,
+    trainingSummary.compliance,
+    trainingSummary.portfolioOutcome
+  ];
 
   return (
     <div className="overlay">
@@ -120,7 +156,9 @@ export function SessionEndScreen() {
         <div className="overlay-header">
           <div className="overlay-copy">
             <p className="eyebrow">Session Complete</p>
+            <p>Trainee: {activeTrainee?.name ?? "Primary Trainee"}</p>
             <h2>Final Score: {score.toLocaleString()}</h2>
+            <p>Overall Training Grade: {trainingSummary.overall.grade} ({trainingSummary.overall.score}/100)</p>
             <p>Final USD: {totalAum.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}</p>
             <p>Compliance Rating: {complianceRating}</p>
             <p>
@@ -138,6 +176,11 @@ export function SessionEndScreen() {
           </div>
         </div>
         <div className="study-summary-grid">
+          <div className="study-summary-card">
+            <span>Overall Training</span>
+            <strong>{trainingSummary.overall.grade}</strong>
+            <small>{trainingSummary.overall.summary}</small>
+          </div>
           <div className="study-summary-card">
             <span>Personal Cash</span>
             <strong>{personalPortfolioUsd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}</strong>
@@ -158,6 +201,16 @@ export function SessionEndScreen() {
             <strong>{complianceRating}</strong>
             <small>{auditHistory.length} audits | {complianceStats.suitabilityViolations} suitability hits</small>
           </div>
+        </div>
+        <div className="portfolio-table">
+          {laneRows.map((lane) => (
+            <div className="portfolio-row" key={lane.label}>
+              <strong>{lane.label}</strong>
+              <span>Grade: {lane.grade}</span>
+              <span>Score: {lane.score}/100</span>
+              <span>{lane.summary}</span>
+            </div>
+          ))}
         </div>
         <div className="portfolio-table">
           {breakdown.map((row) => (

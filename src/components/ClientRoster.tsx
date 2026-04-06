@@ -48,12 +48,25 @@ function crmCadenceLabel(cycleNumber: number, clientId: string) {
   const cyclePhase = (cycleNumber + offset) % 6;
 
   if (cyclePhase === 0) {
-    return "Review due now";
+    return "Review overdue";
   }
   if (cyclePhase <= 2) {
-    return "Review coming up";
+    return "Review due soon";
   }
   return "Service cadence on track";
+}
+
+function crmCadenceDetail(cycleNumber: number, clientId: string) {
+  const offset = clientId.length % 3;
+  const cyclePhase = (cycleNumber + offset) % 6;
+
+  if (cyclePhase === 0) {
+    return "Open follow-up item needs attention this cycle.";
+  }
+  if (cyclePhase <= 2) {
+    return "Prep review notes and refresh suitability talking points.";
+  }
+  return "No urgent CRM action is due right now.";
 }
 
 export function ClientRoster() {
@@ -92,6 +105,7 @@ export function ClientRoster() {
           const mandateLabel =
             client.mandateScore >= 72 ? "Mandate fit strong" : client.mandateScore >= 50 ? "Mandate fit mixed" : "Mandate drifting";
           const crmCadence = crmCadenceLabel(cycleNumber, client.id);
+          const crmDetail = crmCadenceDetail(cycleNumber, client.id);
 
           return (
             <button
@@ -127,6 +141,10 @@ export function ClientRoster() {
               <span className="client-card-trust">
                 CRM: {client.crmProfile.nextReviewWindow} | {crmCadence}
               </span>
+              <span className="client-card-trust">
+                Follow-up: {client.crmProfile.nextTask}
+              </span>
+              <span className="client-card-note">{crmDetail}</span>
               <span className="client-card-trust">
                 IPS: {client.investmentPolicy.equityRangeLabel ?? "Policy active"} | {policyReview.dueLabel}
               </span>
@@ -175,7 +193,12 @@ export function ClientRoster() {
           );
         })}
         <div className="client-section-label">Player Account</div>
-        <div className="client-card player-card">
+        <button
+          type="button"
+          className={`client-card player-card ${activeClientId === "player" ? "active" : ""}`}
+          disabled={questionBankStatus === "loading"}
+          onClick={() => void selectClient("player")}
+        >
           <div className="client-card-top">
             <span className="avatar player-avatar">P</span>
             <span className="status-dot satisfied" />
@@ -188,7 +211,7 @@ export function ClientRoster() {
           <span className={personalMarginCall ? "down" : "client-card-trust"}>Margin Debt: {formatCurrency(personalMarginDebt)} | {personalMarginCall ? "Call active" : "Stable"}</span>
           <span>Status: {playerTradeStatus}</span>
           <span>Compliance: {playerComplianceLevel}%</span>
-        </div>
+        </button>
       </div>
     </section>
   );

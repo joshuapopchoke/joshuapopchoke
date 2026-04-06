@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo } from "react";
+import { Suspense, lazy, useMemo, type ReactNode } from "react";
 import { DIFFICULTY_LABELS, EXAM_BLUEPRINTS } from "../data/examBlueprints";
 import { deriveMarketDateTime, describeMarketSession } from "../engine/marketClock";
 import { getExamKeysForDifficulty } from "../engine/questionBank";
@@ -64,7 +64,19 @@ function computeClientUsd(
   return longValue - shortValue - (client.marginDebt ?? 0);
 }
 
-export function TopBar() {
+interface TopBarProps {
+  brandTitle?: string;
+  showTrainingManager?: boolean;
+  showPlannerTools?: boolean;
+  extraControls?: ReactNode;
+}
+
+export function TopBar({
+  brandTitle = "Fiduciary Duty",
+  showTrainingManager = false,
+  showPlannerTools = true,
+  extraControls = null
+}: TopBarProps) {
   const score = useGameStore((state) => state.score);
   const interestRates = useGameStore((state) => state.interestRates);
   const revenueSnapshot = useGameStore((state) => state.revenueSnapshot);
@@ -93,6 +105,8 @@ export function TopBar() {
   const resetSession = useGameStore((state) => state.resetSession);
   const initializeQuestionBank = useGameStore((state) => state.initializeQuestionBank);
   const activeClient = useSelectedClient();
+  const trainees = useGameStore((state) => state.trainees);
+  const activeTraineeId = useGameStore((state) => state.activeTraineeId);
 
   const minutes = Math.floor(timerSeconds / 60);
   const seconds = timerSeconds % 60;
@@ -154,7 +168,7 @@ export function TopBar() {
       <div className="topbar-main">
         <div className="topbar-brand">
           <p className="eyebrow">Sterling Fiduciary Group</p>
-          <h1>Fiduciary Duty</h1>
+          <h1>{brandTitle}</h1>
         </div>
         <div className="topbar-meta-line">
           <span>{sessionRestored ? `Restored ${formatStamp(lastRestoredAt)}` : "Fresh session"}</span>
@@ -167,24 +181,27 @@ export function TopBar() {
           {(["learner", "trainee", "associate", "advisor", "senior"] as const).map((difficulty) => (
             <button
               key={difficulty}
+              type="button"
               className={activeDifficulty === difficulty ? "control-btn active" : "control-btn"}
               onClick={() => setDifficulty(difficulty)}
             >
               {DIFFICULTY_LABELS[difficulty]}
             </button>
           ))}
-          <button className="control-btn" onClick={() => resetSession()}>
+          <button type="button" className="control-btn" onClick={() => resetSession()}>
             New Session
           </button>
-          <button className={isPaused ? "control-btn active" : "control-btn"} onClick={() => togglePause()}>
+          <button type="button" className={isPaused ? "control-btn active" : "control-btn"} onClick={() => togglePause()}>
             {isPaused ? "Resume" : "Pause"}
           </button>
           <Suspense fallback={<button className="control-btn" disabled>Sessions</button>}>
             <SessionManagerOverlay />
           </Suspense>
-          <button className="control-btn" onClick={() => void initializeQuestionBank(activeDifficulty)}>
+          {showTrainingManager ? null : null}
+          <button type="button" className="control-btn" onClick={() => void initializeQuestionBank(activeDifficulty)}>
             Reload Bank
           </button>
+          {extraControls}
         </div>
       </div>
       <div className="topbar-ribbon">
@@ -250,6 +267,11 @@ export function TopBar() {
             {correctAnswers} correct | {accuracy.toFixed(0)}% | {strongestExam?.count ? strongestExam.exam : "Build streak"}
           </small>
         </div>
+        <div className="ribbon-item ribbon-item--trainee">
+          <span>Trainee</span>
+          <strong>{trainees.find((entry) => entry.id === activeTraineeId)?.name ?? "Primary Trainee"}</strong>
+          <small>{trainees.length} profiles loaded</small>
+        </div>
         <div className="ribbon-item ribbon-item--coach">
           <span>Why It Matters</span>
           <strong>Correct answers build exam confidence and grow your personal portfolio.</strong>
@@ -260,7 +282,7 @@ export function TopBar() {
           <strong>{gameDateLabel}</strong>
           <small>{gameSessionLabel}</small>
         </div>
-        <PlannerToolsRibbonCard />
+        {showPlannerTools ? <PlannerToolsRibbonCard /> : null}
       </div>
     </header>
   );

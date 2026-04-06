@@ -1,10 +1,11 @@
 import type { ClientAccount } from "../types/client";
-import type { OperationsRequestState, PlayDifficulty } from "../types/gameState";
+import type { OperationsRequestState, OperationsWorkflowKind, PlayDifficulty } from "../types/gameState";
 
 function buildRequest(
   client: ClientAccount,
   cycleNumber: number,
   requestId: string,
+  requestKind: OperationsWorkflowKind,
   title: string,
   summary: string,
   prompt: string,
@@ -13,6 +14,7 @@ function buildRequest(
   return {
     clientId: client.id,
     requestId: `${client.id}-${requestId}-${cycleNumber}`,
+    requestKind,
     title,
     summary,
     prompt,
@@ -28,14 +30,64 @@ export function getOperationsRequest(
   difficulty: PlayDifficulty,
   cycleNumber: number
 ): OperationsRequestState | null {
+  return getOperationsRequestByKind(client, difficulty, cycleNumber, "default");
+}
+
+export function getOperationsRequestByKind(
+  client: ClientAccount,
+  difficulty: PlayDifficulty,
+  cycleNumber: number,
+  kind: OperationsWorkflowKind
+): OperationsRequestState | null {
   const simplerPrompt = difficulty === "learner" || difficulty === "trainee";
 
   switch (client.id) {
     case "retiree":
+      if (kind === "rmd") {
+        return buildRequest(
+          client,
+          cycleNumber,
+          "rmd-review",
+          "rmd",
+          "Required distribution workflow",
+          `${client.name} wants the required distribution handled cleanly so the Traditional IRA, taxable reserve, and spending plan all stay coordinated.`,
+          simplerPrompt
+            ? "Do you process the IRA distribution now, stage it after a review, or leave it for later?"
+            : "The client needs an IRA distribution coordinated from the Traditional IRA into the taxable reserve sleeve. Choose whether to process it now, stage it after a quick tax review, or defer it and explain the next step.",
+          [
+            {
+              id: "process-now",
+              label: "Move the required distribution into the taxable reserve now",
+              outcome: "The required distribution was moved out of the Traditional IRA and into the taxable reserve with the withdrawal plan updated.",
+              trustDelta: 6,
+              fromSleeveId: "retiree-trad-ira",
+              toSleeveId: "retiree-taxable",
+              transferAmount: 6500,
+              noteHint: "Document the RMD amount, source sleeve, taxable landing sleeve, and how the reserve bucket supports upcoming spending."
+            },
+            {
+              id: "stage-review",
+              label: "Stage the distribution after a quick withdrawal and tax review",
+              outcome: "The client accepted a short review window so the distribution can be coordinated with the spending plan and tax picture.",
+              trustDelta: 2,
+              noteHint: "Document that the RMD was staged pending a withdrawal-order and tax review."
+            },
+            {
+              id: "defer",
+              label: "Defer the distribution for now",
+              outcome: "The client left uneasy because the retirement withdrawal still feels unresolved and time-sensitive.",
+              trustDelta: -6,
+              noteHint: "Document why the RMD was deferred, what deadline risk remains, and what follow-up is required."
+            }
+          ]
+        );
+      }
+
       return buildRequest(
         client,
         cycleNumber,
         "rmd",
+        "default",
         "RMD processing request",
         `${client.name} asked for help handling an IRA distribution so the retirement plan stays on track without creating unnecessary confusion.`,
         simplerPrompt
@@ -71,6 +123,7 @@ export function getOperationsRequest(
         client,
         cycleNumber,
         "trusted-contact",
+        "default",
         "Trusted contact and beneficiary review",
         `${client.name} wants to clean up the account file after a job change and asked whether anything important is missing from the registration records.`,
         simplerPrompt
@@ -105,6 +158,7 @@ export function getOperationsRequest(
         client,
         cycleNumber,
         "beneficiary-529",
+        "default",
         "529 and beneficiary maintenance request",
         `${client.name} wants the family education and beneficiary records cleaned up so the planning picture is easier to understand.`,
         simplerPrompt
@@ -139,6 +193,7 @@ export function getOperationsRequest(
         client,
         cycleNumber,
         "registration-change",
+        "default",
         "Registration change request",
         `${client.name} wants help deciding whether ownership and beneficiary records should be updated after recent business planning changes.`,
         simplerPrompt
@@ -173,6 +228,7 @@ export function getOperationsRequest(
         client,
         cycleNumber,
         "authorized-contact",
+        "default",
         "Authorized contact maintenance request",
         `${client.name} needs the operating file updated so the right people can approve future instructions and reserve transfers.`,
         simplerPrompt
