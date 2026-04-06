@@ -1,0 +1,280 @@
+import type { ClientAccount, ClientHolding, MarginPosition } from "./client";
+import type { FinancialProfile, Ticker } from "./market";
+import type { Question } from "./question";
+
+export type PlayDifficulty = "learner" | "trainee" | "associate" | "advisor" | "senior";
+export type ChartPeriod = "current" | "1D" | "6M" | "YTD" | "1Y" | "3Y" | "5Y";
+
+export type AppTab = "research" | "portfolio";
+export type QuestionBankStatus = "idle" | "loading" | "ready" | "error";
+export type QuestionBankWarmStatus = "idle" | "warming";
+export type SaveSlotId = string;
+
+export interface SaveSlotSummary {
+  id: SaveSlotId;
+  label: string;
+  savedAt: number | null;
+  difficulty: PlayDifficulty | null;
+  score: number | null;
+}
+
+export interface AuditOutcome {
+  askedAt: number;
+  passed: boolean;
+}
+
+export interface QuestionOutcome {
+  exam: string;
+  domain: string;
+  topicTag: string;
+  correct: boolean;
+}
+
+export interface DomainBreakdownRow {
+  exam: string;
+  domain: string;
+  correct: number;
+  incorrect: number;
+}
+
+export interface ComplianceStats {
+  suitabilityViolations: number;
+  riskOverrides: number;
+  unsuitableProductPlacements: number;
+  concentrationFlags: number;
+}
+
+export type PlayerTradeStatus = "clear" | "fined" | "suspended" | "incarcerated";
+
+export interface InsiderInfoEvent {
+  id: string;
+  symbol: string;
+  title: string;
+  summary: string;
+  prompt: string;
+  legalToTrade: boolean;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+}
+
+export interface PlayerComplianceFeedback {
+  title: string;
+  detail: string;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  legalToTrade: boolean;
+}
+
+export interface TradeFeedback {
+  title: string;
+  detail: string;
+  tone: "positive" | "warning" | "neutral";
+  bullets?: string[];
+}
+
+export interface InsuranceDialoguePromptState {
+  id: string;
+  question: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+}
+
+export interface InsuranceDialogueState {
+  clientId: string;
+  insuranceId: string;
+  title: string;
+  prompts: InsuranceDialoguePromptState[];
+  stepIndex: number;
+  selectedIndex: number | null;
+  score: number;
+  answered: boolean;
+  completed: boolean;
+  accepted: boolean | null;
+  feedback: string | null;
+}
+
+export interface ClientMeetingOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  trustDelta: number;
+  insuranceGapDelta?: number;
+  incomeDelta?: number;
+  expenseDelta?: number;
+  debtPaymentDelta?: number;
+  reserveMonthsDelta?: number;
+  liquidityNeed?: "Low" | "Moderate" | "High";
+}
+
+export interface ClientMeetingState {
+  clientId: string;
+  meetingId: string;
+  title: string;
+  summary: string;
+  question: string;
+  options: ClientMeetingOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  feedback: string | null;
+}
+
+export interface AccountTransferOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  trustDelta: number;
+  fromSleeveId: string | null;
+  toSleeveId: string | null;
+  noteHint?: string;
+}
+
+export interface AccountTransferRequestState {
+  clientId: string;
+  requestId: string;
+  title: string;
+  summary: string;
+  prompt: string;
+  options: AccountTransferOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  feedback: string | null;
+}
+
+export interface DocumentationPromptState {
+  clientId: string;
+  title: string;
+  context: string;
+  suggestedNote: string;
+  noteText: string;
+}
+
+export interface BehavioralEventOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  trustDelta: number;
+  noteHint?: string;
+}
+
+export interface BehavioralEventState {
+  clientId: string;
+  eventId: string;
+  title: string;
+  summary: string;
+  prompt: string;
+  options: BehavioralEventOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  feedback: string | null;
+}
+
+export type TradeFundingMode = "cash" | "margin";
+
+export interface MarketCycleSummary {
+  cycleNumber: number;
+  eventTitle: string | null;
+  leaderSymbol: string | null;
+  leaderChange: number;
+  laggardSymbol: string | null;
+  laggardChange: number;
+  personalImpactUsd: number;
+  clientImpactUsd: number;
+  clientAlerts: string[];
+  lostClientNames: string[];
+}
+
+export interface InterestRateSnapshot {
+  period: ChartPeriod;
+  label: string;
+  fedFunds: number;
+  twoYearTreasury: number;
+  tenYearTreasury: number;
+  mortgage30Year: number;
+  primeRate: number;
+  periodChangeBps: number;
+}
+
+export interface RevenueSnapshot {
+  annualizedGrossRevenue: number;
+  cycleRevenue: number;
+  retainedClients: number;
+  trailingCycleRevenue: number;
+}
+
+export interface QuestionTrackerState {
+  recentlyAsked: string[];
+  questionsAsked: number;
+  lastClientAsked: string | null;
+  domainPerformance: Record<string, { seen: number; correct: number; incorrect: number }>;
+}
+
+export interface ActiveQuestionState {
+  question: Question | null;
+  shuffledOptions: string[];
+  displayCorrectIndex: number;
+  selectedIndex: number | null;
+  answered: boolean;
+}
+
+export interface GameStateShape {
+  score: number;
+  personalPortfolioUsd: number;
+  personalHoldings: Record<string, ClientHolding>;
+  personalShortHoldings: Record<string, MarginPosition>;
+  personalMarginDebt: number;
+  personalMarginCall: boolean;
+  playerComplianceLevel: number;
+  playerViolationCount: number;
+  playerTradeStatus: PlayerTradeStatus;
+  playerSuspensionRounds: number;
+  activeInsiderEvent: InsiderInfoEvent | null;
+  playerComplianceFeedback: PlayerComplianceFeedback | null;
+  playerGameOver: boolean;
+  playerGameOverReason: string | null;
+  secMeterLevel: number;
+  timerSeconds: number;
+  isPaused: boolean;
+  activeDifficulty: PlayDifficulty;
+  selectedChartPeriod: ChartPeriod;
+  gameDateIso: string;
+  activeClientId: string | null;
+  selectedTicker: string;
+  activeTab: AppTab;
+  clients: ClientAccount[];
+  tickers: Record<string, Ticker>;
+  histories: Record<string, number[]>;
+  currentEvent: string | null;
+  cycleNumber: number;
+  lastMarketRefreshAt: number | null;
+  lastCycleSummary: MarketCycleSummary | null;
+  activeCycleRecap: MarketCycleSummary | null;
+  interestRates: InterestRateSnapshot;
+  revenueSnapshot: RevenueSnapshot;
+  activeQuestion: ActiveQuestionState;
+  auditQuestion: ActiveQuestionState;
+  auditTriggered: boolean;
+  auditHistory: AuditOutcome[];
+  removedClientIds: string[];
+  questionOutcomes: QuestionOutcome[];
+  complianceStats: ComplianceStats;
+  researchUnlocks: Record<string, boolean>;
+  questionTracker: QuestionTrackerState;
+  financialProfiles: Record<string, FinancialProfile>;
+  answerStreak: number;
+  bestAnswerStreak: number;
+  tradeFeedback: TradeFeedback | null;
+  questionBankStatus: QuestionBankStatus;
+  questionBankWarmStatus: QuestionBankWarmStatus;
+  loadedQuestionBankKeys: string[];
+  questionBankError: string | null;
+  activeInsuranceDialogue: InsuranceDialogueState | null;
+  activeClientMeeting: ClientMeetingState | null;
+  activeAccountTransferRequest: AccountTransferRequestState | null;
+  activeDocumentationPrompt: DocumentationPromptState | null;
+  activeBehaviorEvent: BehavioralEventState | null;
+  lastSavedAt: number | null;
+  lastRestoredAt: number | null;
+  sessionRestored: boolean;
+  onboardingDismissed: boolean;
+  saveSlots: SaveSlotSummary[];
+  difficultySessions: Partial<Record<PlayDifficulty, unknown>>;
+}

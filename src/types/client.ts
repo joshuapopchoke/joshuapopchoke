@@ -1,0 +1,179 @@
+import type { Question } from "./question";
+
+export type RiskProfile =
+  | "Conservative"
+  | "Moderate"
+  | "Moderate-Aggressive"
+  | "Aggressive";
+
+export type ClientStatus = "satisfied" | "pending" | "at-risk";
+
+export interface ClientHolding {
+  ticker: string;
+  shares: number;
+  averageCost: number;
+}
+
+export interface MarginPosition extends ClientHolding {}
+
+export interface ClientAccountSleeve {
+  id: string;
+  label: string;
+  registration: string;
+  taxTreatment: string;
+  beneficiaryRequired: boolean;
+}
+
+export interface ClientCashFlowProfile {
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  monthlyDebtPayments: number;
+  emergencyReserveMonths: number;
+  nearTermLiquidityNeed: "Low" | "Moderate" | "High";
+}
+
+export interface ClientTaxProfile {
+  filingStatus: string;
+  taxBracketLabel: string;
+  accountTreatment: string;
+}
+
+export interface InvestmentPolicyProfile {
+  objective: string;
+  timeHorizon: string;
+  liquidityNeeds: string;
+  constraints: string[];
+  prohibitedStrategies: string[];
+  prohibitedBuckets?: string[];
+  maxSinglePositionPct?: number;
+  equityRangeLabel?: string;
+  reviewCadence: string;
+  nextReviewFocus: string;
+  spendingRule?: string;
+  retirementIncomeNeed?: string;
+}
+
+export interface RetirementDistributionProfile {
+  distributionPhase: boolean;
+  socialSecurityStrategy: string;
+  rmdStatus: string;
+  withdrawalApproach: string;
+  reserveBucketYears: number;
+  targetWithdrawalRate: number;
+}
+
+export interface BenefitsProfile {
+  primaryPlan: string;
+  employerMatch: string;
+  hsaStrategy: string;
+  equityCompensation: string;
+  planningFocus: string;
+}
+
+export interface EstatePlanningProfile {
+  coreDocuments: string[];
+  trustStructure: string;
+  beneficiaryReview: string;
+  liquidityRisk: string;
+  planningFocus: string;
+}
+
+export interface AccountStructureProfile {
+  registration: string;
+  taxAdvantagedPriority: string;
+  assetLocationNote: string;
+}
+
+export interface EducationPlanningProfile {
+  active: boolean;
+  objective: string;
+  targetYears: string;
+  fundingPriority: string;
+  planningNote: string;
+}
+
+export interface RevenueProfile {
+  advisoryFeeBps: number;
+  serviceTier: string;
+  annualRevenueTarget: number;
+}
+
+export interface RetirementMathProfile {
+  annualSpendingGoal: number;
+  annualGuaranteedIncome: number;
+  expectedReturn: number;
+  inflationAssumption: number;
+  assumedLongevityAge: number | null;
+  safeWithdrawalGuardrail: number;
+}
+
+export interface ProductComparisonProfile {
+  primaryNeed: string;
+  recommendedLane: string;
+  lowerCostAlternative: string;
+  caution: string;
+}
+
+export interface CrmWorkflowProfile {
+  serviceModel: string;
+  nextReviewWindow: string;
+  nextTask: string;
+  lastContactSummary: string;
+  referralPotential: "Low" | "Moderate" | "High";
+}
+
+export interface SupervisionProfile {
+  reviewLevel: string;
+  exceptionFocus: string;
+  documentationPriority: string;
+  supervisionNote: string;
+}
+
+export interface ClientAccount {
+  id: string;
+  name: string;
+  accountType: string;
+  age: number | null;
+  ageLabel: string;
+  householdAges: string[];
+  avatar: string;
+  goal: string;
+  riskProfile: RiskProfile;
+  riskClass: string;
+  description: string;
+  startingAum: number;
+  cash: number;
+  holdings: Record<string, ClientHolding>;
+  shortHoldings: Record<string, MarginPosition>;
+  marginDebt: number;
+  marginCall: boolean;
+  accountSleeves: ClientAccountSleeve[];
+  holdingAccountMap: Record<string, string>;
+  shortHoldingAccountMap: Record<string, string>;
+  status: ClientStatus;
+  trustScore: number;
+  mandateScore: number;
+  advisorNote: string;
+  mandateTargets: string[];
+  watchouts: string[];
+  insuranceNeeds: string[];
+  insuranceCoverage: string[];
+  insurancePressure: number;
+  insuranceGapScore: number;
+  insuranceNote: string;
+  cashFlow: ClientCashFlowProfile;
+  taxProfile: ClientTaxProfile;
+  investmentPolicy: InvestmentPolicyProfile;
+  retirementDistribution: RetirementDistributionProfile;
+  benefitsProfile: BenefitsProfile;
+  estateProfile: EstatePlanningProfile;
+  accountStructure: AccountStructureProfile;
+  educationPlanning: EducationPlanningProfile;
+  revenueProfile: RevenueProfile;
+  retirementMath: RetirementMathProfile;
+  productComparison: ProductComparisonProfile;
+  crmProfile: CrmWorkflowProfile;
+  supervisionProfile: SupervisionProfile;
+  clientNotes: string[];
+  questionSet: Question[];
+}
