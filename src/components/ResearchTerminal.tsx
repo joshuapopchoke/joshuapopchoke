@@ -297,6 +297,32 @@ function buildDeskLens(symbol: string, category: string) {
   };
 }
 
+function buildRiskReporting(symbol: string, category: string) {
+  const base = seededNumber(symbol, 41);
+
+  if (category === "stocks" || category === "funds") {
+    return {
+      relativeStrength: `${((base - 0.32) * 18).toFixed(2)}% vs benchmark`,
+      correlation: `${(0.42 + seededNumber(symbol, 42) * 0.48).toFixed(2)} to core benchmark`,
+      drawdown: `${(8 + seededNumber(symbol, 43) * 30).toFixed(1)}% peak-to-trough band`
+    };
+  }
+
+  if (category === "bonds" || category === "fixedIncome") {
+    return {
+      relativeStrength: `${((base - 0.38) * 9).toFixed(2)}% vs Agg`,
+      correlation: `${(0.18 + seededNumber(symbol, 42) * 0.34).toFixed(2)} to equities`,
+      drawdown: `${(2 + seededNumber(symbol, 43) * 10).toFixed(1)}% stress band`
+    };
+  }
+
+  return {
+    relativeStrength: `${((base - 0.42) * 13).toFixed(2)}% regime spread`,
+    correlation: `${(0.08 + seededNumber(symbol, 42) * 0.52).toFixed(2)} to risk assets`,
+    drawdown: `${(5 + seededNumber(symbol, 43) * 22).toFixed(1)}% event band`
+  };
+}
+
 function buildQuoteTape(symbol: string, price: number, prevPrice: number, category: string) {
   const volatilityBase = seededNumber(symbol, 31);
   const spread = Math.max(price * (0.002 + volatilityBase * 0.01), category === "forex" ? 0.0004 : 0.04);
@@ -417,6 +443,10 @@ export function ResearchTerminal() {
     () => (ticker ? buildDeskLens(ticker.symbol, ticker.category) : null),
     [ticker]
   );
+  const riskReporting = useMemo(
+    () => (ticker ? buildRiskReporting(ticker.symbol, ticker.category) : null),
+    [ticker]
+  );
   const taxGuidance = useMemo(
     () => (ticker && activeClient ? buildClientTaxGuidance(activeClient, ticker) : null),
     [activeClient, ticker]
@@ -514,6 +544,25 @@ export function ResearchTerminal() {
                   <strong>{String(value)}</strong>
                 </div>
               ))}
+            </div>
+          </div>
+        ) : null}
+        {riskReporting ? (
+          <div className="comparison-section">
+            <div className="peer-table-title">Risk Reporting</div>
+            <div className="comparison-grid">
+              <div className="comparison-card">
+                <span>Relative Strength</span>
+                <strong>{riskReporting.relativeStrength}</strong>
+              </div>
+              <div className="comparison-card">
+                <span>Correlation</span>
+                <strong>{riskReporting.correlation}</strong>
+              </div>
+              <div className="comparison-card">
+                <span>Drawdown Band</span>
+                <strong>{riskReporting.drawdown}</strong>
+              </div>
             </div>
           </div>
         ) : null}
@@ -658,6 +707,25 @@ export function ResearchTerminal() {
                     <strong>{String(value)}</strong>
                   </div>
                 ))}
+              </div>
+            </div>
+          ) : null}
+          {riskReporting ? (
+            <div className="comparison-section">
+              <div className="peer-table-title">Risk Reporting</div>
+              <div className="comparison-grid">
+                <div className="comparison-card">
+                  <span>Relative Strength</span>
+                  <strong>{riskReporting.relativeStrength}</strong>
+                </div>
+                <div className="comparison-card">
+                  <span>Correlation</span>
+                  <strong>{riskReporting.correlation}</strong>
+                </div>
+                <div className="comparison-card">
+                  <span>Drawdown Band</span>
+                  <strong>{riskReporting.drawdown}</strong>
+                </div>
               </div>
             </div>
           ) : null}

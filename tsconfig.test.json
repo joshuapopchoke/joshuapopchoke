@@ -16,6 +16,7 @@
     "src/types/**/*.ts",
     "src/data/**/*.ts",
     "src/engine/**/*.ts",
+    "tools/**/*.ts",
     "tools/engine-selfcheck.ts",
     "tools/stress-sim.ts"
   ]

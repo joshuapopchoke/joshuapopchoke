@@ -148,6 +148,7 @@ export interface ClientAccount {
   marginDebt: number;
   marginCall: boolean;
   accountSleeves: ClientAccountSleeve[];
+  sleeveCashBalances: Record<string, number>;
   holdingAccountMap: Record<string, string>;
   shortHoldingAccountMap: Record<string, string>;
   status: ClientStatus;

@@ -31,6 +31,21 @@ export function OrderEntry() {
   const selectedIsMarginable = selectedAsset ? selectedAsset.category === "stocks" || selectedAsset.category === "funds" : false;
   const [selectedClientId] = accountTarget === "player" ? [null] : accountTarget.split("::");
   const selectedClient = selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
+  const sleeveTotals = selectedClient
+    ? Object.fromEntries(
+        selectedClient.accountSleeves.map((sleeve) => {
+          const sleeveCash = selectedClient.sleeveCashBalances[sleeve.id] ?? 0;
+          const sleeveLongValue = Object.values(selectedClient.holdings)
+            .filter((holding) => (selectedClient.holdingAccountMap[holding.ticker] ?? selectedClient.accountSleeves[0]?.id) === sleeve.id)
+            .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+          const sleeveShortValue = Object.values(selectedClient.shortHoldings ?? {})
+            .filter((holding) => (selectedClient.shortHoldingAccountMap[holding.ticker] ?? selectedClient.accountSleeves[0]?.id) === sleeve.id)
+            .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+
+          return [sleeve.id, sleeveCash + sleeveLongValue - sleeveShortValue];
+        })
+      )
+    : {};
   const policyBucketBlocked =
     Boolean(selectedClient && selectedAsset && (selectedClient.investmentPolicy.prohibitedBuckets ?? []).includes(selectedAsset.category));
 
@@ -94,7 +109,7 @@ export function OrderEntry() {
               <optgroup key={client.id} label={client.name}>
                 {client.accountSleeves.map((sleeve) => (
                   <option key={sleeve.id} value={`${client.id}::${sleeve.id}`}>
-                    {sleeve.label}
+                    {sleeve.label} - {(sleeveTotals[sleeve.id] ?? 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
                   </option>
                 ))}
               </optgroup>

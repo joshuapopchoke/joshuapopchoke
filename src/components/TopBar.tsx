@@ -3,6 +3,7 @@ import { DIFFICULTY_LABELS, EXAM_BLUEPRINTS } from "../data/examBlueprints";
 import { deriveMarketDateTime, describeMarketSession } from "../engine/marketClock";
 import { getExamKeysForDifficulty } from "../engine/questionBank";
 import { useGameStore, useSelectedClient } from "../store/gameStore";
+import { PlannerToolsRibbonCard } from "./PlannerToolsRibbonCard";
 
 const SessionManagerOverlay = lazy(() => import("./SessionManagerOverlay").then((module) => ({ default: module.SessionManagerOverlay })));
 
@@ -259,6 +260,7 @@ export function TopBar() {
           <strong>{gameDateLabel}</strong>
           <small>{gameSessionLabel}</small>
         </div>
+        <PlannerToolsRibbonCard />
       </div>
     </header>
   );

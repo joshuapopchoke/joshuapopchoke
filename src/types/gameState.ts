@@ -167,6 +167,70 @@ export interface BehavioralEventState {
   feedback: string | null;
 }
 
+export interface OperationsRequestOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  trustDelta: number;
+  cashDelta?: number;
+  noteHint?: string;
+}
+
+export interface OperationsRequestState {
+  clientId: string;
+  requestId: string;
+  title: string;
+  summary: string;
+  prompt: string;
+  options: OperationsRequestOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  feedback: string | null;
+}
+
+export interface RecommendationOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  trustDelta: number;
+  followUpTask: string;
+  accepted: boolean;
+}
+
+export interface RecommendationDialogueState {
+  clientId: string;
+  recommendationId: string;
+  title: string;
+  summary: string;
+  clientQuestion: string;
+  options: RecommendationOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  accepted: boolean | null;
+  feedback: string | null;
+}
+
+export interface SupervisionRequestOptionState {
+  id: string;
+  label: string;
+  outcome: string;
+  secDelta: number;
+  trustDelta: number;
+  noteHint?: string;
+}
+
+export interface SupervisionRequestState {
+  clientId: string;
+  requestId: string;
+  title: string;
+  summary: string;
+  prompt: string;
+  options: SupervisionRequestOptionState[];
+  resolved: boolean;
+  selectedOptionId: string | null;
+  feedback: string | null;
+}
+
 export type TradeFundingMode = "cash" | "margin";
 
 export interface MarketCycleSummary {
@@ -244,6 +308,7 @@ export interface GameStateShape {
   histories: Record<string, number[]>;
   currentEvent: string | null;
   cycleNumber: number;
+  workflowCooldownUntilCycle: number;
   lastMarketRefreshAt: number | null;
   lastCycleSummary: MarketCycleSummary | null;
   activeCycleRecap: MarketCycleSummary | null;
@@ -269,6 +334,9 @@ export interface GameStateShape {
   activeInsuranceDialogue: InsuranceDialogueState | null;
   activeClientMeeting: ClientMeetingState | null;
   activeAccountTransferRequest: AccountTransferRequestState | null;
+  activeOperationsRequest: OperationsRequestState | null;
+  activeRecommendationDialogue: RecommendationDialogueState | null;
+  activeSupervisionRequest: SupervisionRequestState | null;
   activeDocumentationPrompt: DocumentationPromptState | null;
   activeBehaviorEvent: BehavioralEventState | null;
   lastSavedAt: number | null;

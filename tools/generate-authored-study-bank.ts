@@ -1,9 +1,26 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
+import type { Question, QuestionDifficulty } from "../src/types/question";
+
+type AuthoredExamName = "SIE" | "Series 7" | "Series 65" | "Series 66";
+interface ConceptSeed {
+  tag: string;
+  stem: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+}
+
+type FrameBuilder = (_context: string, stem: string) => string;
 
 const outDir = path.join(__dirname, "..", "src", "data", "authoredQuestions");
-const D = { SIE: "trainee", "Series 7": "advisor", "Series 65": "associate", "Series 66": "senior" };
-const C = { SIE: 62, "Series 7": 30, "Series 65": 45, "Series 66": 28 };
+const D: Record<AuthoredExamName, QuestionDifficulty> = {
+  SIE: "trainee",
+  "Series 7": "advisor",
+  "Series 65": "associate",
+  "Series 66": "senior"
+};
+const C: Record<AuthoredExamName, number> = { SIE: 62, "Series 7": 30, "Series 65": 45, "Series 66": 28 };
 const L = {
   sie: ["Knowledge of Capital Markets", "Understanding Products and Their Risks", "Understanding Trading, Customer Accounts and Prohibited Activities", "Overview of the Regulatory Framework"],
   s7: ["Seeks Business for the Broker-Dealer from Customers and Potential Customers", "Opens Accounts After Obtaining and Evaluating Customers' Financial Profile and Investment Objectives", "Provides Customers with Information about Investments, Makes Recommendations, Transfers Assets and Maintains Appropriate Records", "Obtains and Verifies Customers' Purchase and Sales Instructions and Agreements; Processes, Completes, and Confirms Transactions"],
@@ -11,24 +28,24 @@ const L = {
   s66: ["Economic Factors and Business Information", "Investment Vehicle Characteristics", "Client/Customer Investment Recommendations and Strategies", "Laws, Regulations, and Guidelines Including Prohibition on Unethical Business Practices"]
 };
 
-function q(exam, domain, tag, question, options, correct, explanation) {
+function q(exam: AuthoredExamName, domain: string, tag: string, question: string, options: string[], correct: number, explanation: string): Question {
   return { exam, domain, difficulty: D[exam], cooldown: C[exam], topicTag: tag, question, options, correct, explanation, points: 10 };
 }
-function c(tag, stem, options, correct, explanation) { return { tag, stem, options, correct, explanation }; }
-function writeExamFile(key, constName, questions) {
+function c(tag: string, stem: string, options: string[], correct: number, explanation: string): ConceptSeed { return { tag, stem, options, correct, explanation }; }
+function writeExamFile(key: string, constName: string, questions: Question[]): void {
   const file = path.join(outDir, `${key}.ts`);
   const source = `import type { Question } from "../../types/question";\n\nexport const ${constName} = ${JSON.stringify(questions, null, 2)} satisfies Question[];\n`;
   fs.writeFileSync(file, source);
 }
-const frames = [
+const frames: FrameBuilder[] = [
   (_ctx, stem) => stem,
   (_ctx, stem) => `A client scenario asks: ${stem}`,
   (_ctx, stem) => `Which response is most accurate? ${stem}`,
   (_ctx, stem) => `Which answer best fits this situation? ${stem}`
 ];
 const contexts = ["standard practice", "client review", "study drill", "compliance review"];
-function expand(exam, domain, prefix, concepts, target) {
-  const out = [];
+function expand(exam: AuthoredExamName, domain: string, prefix: string, concepts: ConceptSeed[], target: number): Question[] {
+  const out: Question[] = [];
   concepts.forEach((x, i) => frames.forEach((f, j) => out.push(q(exam, domain, `${prefix}-${x.tag}-${j + 1}`, f(contexts[(i + j) % contexts.length], x.stem), x.options, x.correct, x.explanation))));
   let n = 0;
   while (out.length < target) {
@@ -173,8 +190,8 @@ const s66Laws = [
   c("commingling", "How is commingling client funds with firm funds generally viewed?", ["As prohibited or highly improper", "As efficient bookkeeping", "As irrelevant if performance is good", "As a substitute for custody controls"], 0, "Keeping client assets separate is a core investor-protection principle. Commingling can facilitate misuse and create major compliance risk.")
 ];
 
-function series7Options() {
-  const out = [];
+function series7Options(): Question[] {
+  const out: Question[] = [];
   let n = 1;
   for (const strike of [45, 50, 55, 60, 65]) for (const p of [2, 3, 4, 5]) out.push(q("Series 7", L.s7[2], `s7-opt-lc-${n++}`, `A customer buys 1 XYZ ${strike} call for a premium of ${p}. At what stock price at expiration does the position break even, ignoring commissions?`, [`$${strike + p}`, `$${strike - p}`, `$${strike}`, `$${p}`], 0, `A long call breaks even at the strike price plus the premium paid. Above that price, intrinsic value begins to offset the option cost.`));
   for (const strike of [45, 50, 55, 60, 65]) for (const p of [2, 3, 4, 5]) out.push(q("Series 7", L.s7[2], `s7-opt-lp-${n++}`, `A customer buys 1 XYZ ${strike} put for a premium of ${p}. At what stock price at expiration does the position break even, ignoring commissions?`, [`$${strike - p}`, `$${strike + p}`, `$${strike}`, `$${p}`], 0, `A long put breaks even at the strike price minus the premium paid. Below that price, the position's intrinsic value exceeds the premium cost.`));
@@ -227,3 +244,5 @@ writeExamFile("series7", "SERIES7_AUTHORED_QUESTIONS", authored.series7);
 writeExamFile("series65", "SERIES65_AUTHORED_QUESTIONS", authored.series65);
 writeExamFile("series66", "SERIES66_AUTHORED_QUESTIONS", authored.series66);
 console.log(JSON.stringify({ sie: authored.sie.length, series7: authored.series7.length, series65: authored.series65.length, series66: authored.series66.length }, null, 2));
+
+

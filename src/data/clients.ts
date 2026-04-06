@@ -25,6 +25,11 @@ export const CLIENTS: ClientAccount[] = [
       { id: "retiree-trad-ira", label: "Traditional IRA", registration: "Traditional IRA", taxTreatment: "Tax-deferred, RMD eligible", beneficiaryRequired: true },
       { id: "retiree-roth", label: "Roth IRA", registration: "Roth IRA", taxTreatment: "Tax-free qualified withdrawals", beneficiaryRequired: true }
     ],
+    sleeveCashBalances: {
+      "retiree-taxable": 365000,
+      "retiree-trad-ira": 50000,
+      "retiree-roth": 35000
+    },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
     status: "pending",
@@ -155,6 +160,11 @@ export const CLIENTS: ClientAccount[] = [
       { id: "young-roth", label: "Roth IRA", registration: "Roth IRA", taxTreatment: "Tax-free qualified withdrawals", beneficiaryRequired: true },
       { id: "young-taxable", label: "Taxable Brokerage", registration: "Taxable", taxTreatment: "Taxable capital gains and dividends", beneficiaryRequired: false }
     ],
+    sleeveCashBalances: {
+      "young-401k": 35000,
+      "young-roth": 15000,
+      "young-taxable": 35000
+    },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
     status: "pending",
@@ -285,6 +295,11 @@ export const CLIENTS: ClientAccount[] = [
       { id: "family-401k", label: "Retirement Accounts", registration: "401(k)/IRA mix", taxTreatment: "Tax-deferred retirement savings", beneficiaryRequired: true },
       { id: "family-taxable", label: "Taxable Household", registration: "Joint Taxable", taxTreatment: "Taxable household investing", beneficiaryRequired: false }
     ],
+    sleeveCashBalances: {
+      "family-529": 60000,
+      "family-401k": 90000,
+      "family-taxable": 70000
+    },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
     status: "pending",
@@ -415,6 +430,11 @@ export const CLIENTS: ClientAccount[] = [
       { id: "entrepreneur-retirement", label: "Retirement Sleeve", registration: "SEP / IRA style", taxTreatment: "Tax-advantaged retirement capital", beneficiaryRequired: true },
       { id: "entrepreneur-trust", label: "Trust / Estate Sleeve", registration: "Trust", taxTreatment: "Trust and legacy planning sleeve", beneficiaryRequired: true }
     ],
+    sleeveCashBalances: {
+      "entrepreneur-taxable": 750000,
+      "entrepreneur-retirement": 250000,
+      "entrepreneur-trust": 200000
+    },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
     status: "pending",
@@ -545,6 +565,11 @@ export const CLIENTS: ClientAccount[] = [
       { id: "institutional-longterm", label: "Long-Term Pool", registration: "Endowment Long-Term", taxTreatment: "Tax-exempt growth sleeve", beneficiaryRequired: false },
       { id: "institutional-spending", label: "Spending Support", registration: "Spending Support Sleeve", taxTreatment: "Tax-exempt spending rule sleeve", beneficiaryRequired: false }
     ],
+    sleeveCashBalances: {
+      "institutional-operating": 1000000,
+      "institutional-longterm": 3000000,
+      "institutional-spending": 1000000
+    },
     holdingAccountMap: {},
     shortHoldingAccountMap: {},
     status: "pending",

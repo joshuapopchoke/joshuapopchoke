@@ -43,6 +43,19 @@ function annualizedRevenue(clientUsd: number, feeBps: number) {
   return clientUsd * feeBps / 10000;
 }
 
+function crmCadenceLabel(cycleNumber: number, clientId: string) {
+  const offset = clientId.length % 3;
+  const cyclePhase = (cycleNumber + offset) % 6;
+
+  if (cyclePhase === 0) {
+    return "Review due now";
+  }
+  if (cyclePhase <= 2) {
+    return "Review coming up";
+  }
+  return "Service cadence on track";
+}
+
 export function ClientRoster() {
   const clients = useGameStore((state) => state.clients);
   const personalPortfolioUsd = useGameStore((state) => state.personalPortfolioUsd);
@@ -78,6 +91,7 @@ export function ClientRoster() {
           const revenue = annualizedRevenue(accountUsd, client.revenueProfile.advisoryFeeBps);
           const mandateLabel =
             client.mandateScore >= 72 ? "Mandate fit strong" : client.mandateScore >= 50 ? "Mandate fit mixed" : "Mandate drifting";
+          const crmCadence = crmCadenceLabel(cycleNumber, client.id);
 
           return (
             <button
@@ -111,7 +125,7 @@ export function ClientRoster() {
                 Revenue: {formatCompactUsd(revenue)}/yr | {client.revenueProfile.serviceTier}
               </span>
               <span className="client-card-trust">
-                CRM: {client.crmProfile.nextReviewWindow} | {client.crmProfile.serviceModel}
+                CRM: {client.crmProfile.nextReviewWindow} | {crmCadence}
               </span>
               <span className="client-card-trust">
                 IPS: {client.investmentPolicy.equityRangeLabel ?? "Policy active"} | {policyReview.dueLabel}

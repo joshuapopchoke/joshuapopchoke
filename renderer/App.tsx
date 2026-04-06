@@ -15,10 +15,13 @@ const CycleRecapOverlay = lazy(() => import("../src/components/CycleRecapOverlay
 const DocumentationOverlay = lazy(() => import("../src/components/DocumentationOverlay").then((module) => ({ default: module.DocumentationOverlay })));
 const InsuranceDialogueOverlay = lazy(() => import("../src/components/InsuranceDialogueOverlay").then((module) => ({ default: module.InsuranceDialogueOverlay })));
 const OnboardingOverlay = lazy(() => import("../src/components/OnboardingOverlay").then((module) => ({ default: module.OnboardingOverlay })));
+const OperationsRequestOverlay = lazy(() => import("../src/components/OperationsRequestOverlay").then((module) => ({ default: module.OperationsRequestOverlay })));
 const PortfolioPanel = lazy(() => import("../src/components/PortfolioPanel").then((module) => ({ default: module.PortfolioPanel })));
 const PlayerComplianceOverlay = lazy(() => import("../src/components/PlayerComplianceOverlay").then((module) => ({ default: module.PlayerComplianceOverlay })));
+const RecommendationDialogueOverlay = lazy(() => import("../src/components/RecommendationDialogueOverlay").then((module) => ({ default: module.RecommendationDialogueOverlay })));
 const ResearchTerminal = lazy(() => import("../src/components/ResearchTerminal").then((module) => ({ default: module.ResearchTerminal })));
 const SessionEndScreen = lazy(() => import("../src/components/SessionEndScreen").then((module) => ({ default: module.SessionEndScreen })));
+const SupervisionRequestOverlay = lazy(() => import("../src/components/SupervisionRequestOverlay").then((module) => ({ default: module.SupervisionRequestOverlay })));
 
 export default function App() {
   const activeTab = useGameStore((state) => state.activeTab);
@@ -79,8 +82,11 @@ export default function App() {
         <DocumentationOverlay />
         <InsuranceDialogueOverlay />
         <OnboardingOverlay />
+        <OperationsRequestOverlay />
         <PlayerComplianceOverlay />
+        <RecommendationDialogueOverlay />
         <SessionEndScreen />
+        <SupervisionRequestOverlay />
       </Suspense>
     </main>
   );

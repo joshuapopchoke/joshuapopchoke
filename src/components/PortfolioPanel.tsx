@@ -8,9 +8,11 @@ import {
   buildRetirementMathSnapshot,
   buildSupervisionSnapshot
 } from "../engine/holisticPlanningEngine";
+import { buildPortfolioAnalyticsSnapshot } from "../engine/marketAnalyticsEngine";
 import { betaFitLabel, betaRangeForRisk, calculatePortfolioBeta } from "../engine/portfolioAnalytics";
 import { buildPolicyReviewSnapshot } from "../engine/policyReviewEngine";
 import { buildRebalancePlan } from "../engine/rebalancingEngine";
+import { buildRecommendationCards } from "../engine/recommendationEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
 import { buildAdvancedTaxPlanningSnapshot, estimatePortfolioTaxSnapshot } from "../engine/taxEngine";
 import { useGameStore } from "../store/gameStore";
@@ -42,6 +44,7 @@ export function PortfolioPanel() {
   const tickers = useGameStore((state) => state.tickers);
   const cycleNumber = useGameStore((state) => state.cycleNumber);
   const startInsuranceRecommendation = useGameStore((state) => state.startInsuranceRecommendation);
+  const startRecommendationDialogue = useGameStore((state) => state.startRecommendationDialogue);
   const deferInsurance = useGameStore((state) => state.deferInsurance);
   const rebalanceActiveClient = useGameStore((state) => state.rebalanceActiveClient);
   const activeClient = useMemo(
@@ -131,12 +134,20 @@ export function PortfolioPanel() {
         });
 
       const sleeveMarketValue = sleeveRows.reduce((sum, row) => sum + row.marketValue, 0);
+      const sleeveShortValue = Object.values(activeClient.shortHoldings ?? {})
+        .filter((holding) => (activeClient.shortHoldingAccountMap[holding.ticker] ?? activeClient.accountSleeves[0]?.id) === sleeve.id)
+        .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
       const sleeveUnrealized = sleeveRows.reduce((sum, row) => sum + row.unrealized, 0);
+      const sleeveCash = activeClient.sleeveCashBalances[sleeve.id] ?? 0;
+      const sleeveTotal = sleeveCash + sleeveMarketValue - sleeveShortValue;
 
       return {
         sleeve,
         rows: sleeveRows,
+        sleeveCash,
         sleeveMarketValue,
+        sleeveShortValue,
+        sleeveTotal,
         sleeveUnrealized
       };
     });
@@ -239,13 +250,21 @@ export function PortfolioPanel() {
       reserveGap
     };
   }, [activeClient]);
+  const advancedTaxSnapshot = useMemo(
+    () => activeClient && clientTaxSnapshot ? buildAdvancedTaxPlanningSnapshot(activeClient, clientTaxSnapshot) : null,
+    [activeClient, clientTaxSnapshot]
+  );
   const retirementMathSnapshot = useMemo(
     () => activeClient ? buildRetirementMathSnapshot(activeClient, activeClientUsd) : null,
     [activeClient, activeClientUsd]
   );
-  const advancedTaxSnapshot = useMemo(
-    () => activeClient && clientTaxSnapshot ? buildAdvancedTaxPlanningSnapshot(activeClient, clientTaxSnapshot) : null,
-    [activeClient, clientTaxSnapshot]
+  const recommendationCards = useMemo(
+    () => activeClient ? buildRecommendationCards(activeClient) : [],
+    [activeClient]
+  );
+  const portfolioAnalytics = useMemo(
+    () => activeClient ? buildPortfolioAnalyticsSnapshot(activeClient, tickers) : null,
+    [activeClient, tickers]
   );
 
   return (
@@ -302,11 +321,11 @@ export function PortfolioPanel() {
           <div className="empty-state">Select a client to review that individual portfolio.</div>
         ) : (
           <div className="portfolio-table">
-            {clientSleeveRows.map(({ sleeve, rows, sleeveMarketValue, sleeveUnrealized }) => (
+            {clientSleeveRows.map(({ sleeve, rows, sleeveCash, sleeveMarketValue, sleeveTotal, sleeveUnrealized }) => (
               <div className="portfolio-section" key={sleeve.id}>
                 <div className="portfolio-summary-card">
                   <span>{sleeve.label}</span>
-                  <strong>{sleeve.registration}</strong>
+                  <strong>{sleeve.registration} - {formatCurrency(sleeveTotal)}</strong>
                   <small>{sleeve.taxTreatment}{sleeve.beneficiaryRequired ? " | beneficiary tracked" : ""}</small>
                 </div>
                 {rows.length === 0 ? (
@@ -328,9 +347,9 @@ export function PortfolioPanel() {
                   ))
                 )}
                 <div className="portfolio-summary-card">
-                  <span>{sleeve.label} total</span>
-                  <strong>{formatCurrency(sleeveMarketValue)}</strong>
-                  <small className={sleeveUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(sleeveUnrealized)} unrealized</small>
+                  <span>{sleeve.label} breakdown</span>
+                  <strong>{formatCurrency(sleeveCash)} cash | {formatCurrency(sleeveMarketValue)} invested</strong>
+                  <small className={sleeveUnrealized >= 0 ? "up" : "down"}>{formatSignedCurrency(sleeveUnrealized)} unrealized | {formatCurrency(sleeveTotal)} total</small>
                 </div>
               </div>
             ))}
@@ -557,6 +576,55 @@ export function PortfolioPanel() {
         </div>
       ) : null}
 
+      {activeClient && portfolioAnalytics ? (
+        <div className="portfolio-section">
+          <div className="portfolio-section-title">Market & Risk Analytics</div>
+          <div className="portfolio-summary-card">
+            <span>Benchmark and drawdown lens</span>
+            <strong>{portfolioAnalytics.benchmarkRelative}</strong>
+            <small>{portfolioAnalytics.drawdownBand} | Diversification score {portfolioAnalytics.diversificationScore}/100</small>
+          </div>
+          <div className="portfolio-summary-card">
+            <span>Concentration watch</span>
+            <strong>{portfolioAnalytics.largestPositionName} at {portfolioAnalytics.concentrationPct.toFixed(0)}%</strong>
+            <small>{portfolioAnalytics.largestSector} leads at {portfolioAnalytics.largestSectorPct.toFixed(0)}% of the sleeve</small>
+          </div>
+          <div className="portfolio-table">
+            {portfolioAnalytics.sleeveAllocation.map((row) => (
+              <div className="portfolio-row portfolio-row--stacked" key={row.label}>
+                <strong>{row.label}</strong>
+                <span>{row.valuePct.toFixed(0)}% of account</span>
+                <span>Weighted beta {portfolioAnalytics.weightedBeta.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {activeClient && recommendationCards.length > 0 ? (
+        <div className="portfolio-section">
+          <div className="portfolio-section-title">Recommendation Workflow</div>
+          <div className="insurance-grid">
+            {recommendationCards.map((card) => (
+              <div className="insurance-card" key={card.id}>
+                <strong>{card.title}</strong>
+                <small>{card.summary}</small>
+                <p className="explanation">Follow-up task: {card.followUpTask}</p>
+                <div className="insurance-actions">
+                  <button
+                    className="control-btn"
+                    onClick={() => startRecommendationDialogue(activeClient.id, card.id)}
+                    type="button"
+                  >
+                    Present Recommendation
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {activeClient && rebalancePlan ? (
         <div className="portfolio-section">
           <div className="portfolio-section-title">Rebalancing & Drift</div>
@@ -624,6 +692,9 @@ export function PortfolioPanel() {
                 <strong>{product.name}</strong>
                 <small>{product.pitch}</small>
                 <p className="explanation">{product.growthAngle}</p>
+                <p className="explanation"><strong>Best fit:</strong> {product.bestFor}</p>
+                <p className="explanation"><strong>Compare against:</strong> {product.compareAgainst}</p>
+                <p className="explanation"><strong>Caution:</strong> {product.caution}</p>
                 <div className="insurance-actions">
                   <button
                     className="control-btn"

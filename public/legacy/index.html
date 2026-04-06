@@ -1701,14 +1701,10 @@
 // FIDUCIARY DUTY — Game Engine
 // =============================================
 
-const { MarketEngine, CLIENT_PERSONAS } = (() => {
-  try {
-    return require('./engine/market.js');
-  } catch(e) {
-    // Fallback for browser preview
-    return { MarketEngine: null, CLIENT_PERSONAS: [] };
-  }
-})();
+const { MarketEngine, CLIENT_PERSONAS } = {
+  MarketEngine: null,
+  CLIENT_PERSONAS: []
+};
 
 // =============================================
 // DIFFICULTY CONFIGURATIONS

@@ -6,9 +6,12 @@ import { getBehaviorScenario } from "../data/clientBehaviorEvents";
 import { getClientMeetingScenario } from "../data/clientMeetings";
 import { getInsuranceDialogue } from "../data/insuranceDialogues";
 import { INSURANCE_PRODUCTS } from "../data/insuranceProducts";
+import { buildSupervisionRequest } from "../data/supervisionRequests";
 import { advanceTradingDate, createInitialMarketDate, deriveMarketDateTime, hasAdvancedMarketStep, parseMarketDate } from "../engine/marketClock";
 import { createMarketEngine } from "../engine/marketEngine";
+import { getOperationsRequest } from "../data/operationsRequests";
 import { betaRangeForRisk, calculatePortfolioBeta } from "../engine/portfolioAnalytics";
+import { getRecommendationDialogue } from "../engine/recommendationEngine";
 import { buildRevenueSnapshot } from "../engine/revenueEngine";
 import { buildInterestRateSnapshot, refreshCallableBondTerms } from "../engine/rateEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
@@ -32,11 +35,14 @@ import type {
   ClientMeetingState,
   DocumentationPromptState,
   GameStateShape,
+  OperationsRequestState,
   PlayDifficulty,
   QuestionBankStatus,
   QuestionBankWarmStatus,
+  RecommendationDialogueState,
   SaveSlotId,
   SaveSlotSummary,
+  SupervisionRequestState,
   TradeFundingMode
 } from "../types/gameState";
 import type { ClientAccount, ClientHolding, ClientStatus } from "../types/client";
@@ -54,6 +60,7 @@ function cloneClients() {
   return CLIENTS.map((client) => ({
     ...client,
     cash: client.startingAum,
+    sleeveCashBalances: { ...client.sleeveCashBalances },
     holdings: {},
     shortHoldings: {},
     marginDebt: 0,
@@ -63,6 +70,64 @@ function cloneClients() {
     insuranceGapScore: client.insuranceGapScore,
     status: "pending" as const
   }));
+}
+
+function sumSleeveCashBalances(balances: Record<string, number>) {
+  return Number(Object.values(balances).reduce((total, value) => total + value, 0).toFixed(2));
+}
+
+function normalizeSleeveCashBalances(
+  client: Pick<ClientAccount, "accountSleeves" | "startingAum" | "cash">,
+  balances: Record<string, number> | undefined,
+  fallbackBalances?: Record<string, number>
+) {
+  const template = fallbackBalances ?? {};
+  const nextBalances = Object.fromEntries(
+    client.accountSleeves.map((sleeve) => [
+      sleeve.id,
+      Number((balances?.[sleeve.id] ?? template[sleeve.id] ?? 0).toFixed(2))
+    ])
+  ) as Record<string, number>;
+
+  const currentTotal = sumSleeveCashBalances(nextBalances);
+  const fallbackTotal = sumSleeveCashBalances(template);
+  const desiredTotal =
+    currentTotal > 0 ? currentTotal :
+    fallbackTotal > 0 ? fallbackTotal :
+    Number((client.cash || client.startingAum).toFixed(2));
+
+  const difference = Number((desiredTotal - currentTotal).toFixed(2));
+  if (Math.abs(difference) > 0.009 && client.accountSleeves[0]) {
+    const primarySleeveId = client.accountSleeves[0].id;
+    nextBalances[primarySleeveId] = Number(((nextBalances[primarySleeveId] ?? 0) + difference).toFixed(2));
+  }
+
+  return nextBalances;
+}
+
+function clientPrimarySleeveId(client: ClientAccount) {
+  return client.accountSleeves[0]?.id ?? "primary";
+}
+
+function getSleeveCashBalance(client: ClientAccount, sleeveId: string) {
+  return client.sleeveCashBalances[sleeveId] ?? 0;
+}
+
+function setSleeveCashBalance(client: ClientAccount, sleeveId: string, value: number) {
+  const sleeveCashBalances = {
+    ...client.sleeveCashBalances,
+    [sleeveId]: Number(Math.max(0, value).toFixed(2))
+  };
+
+  return {
+    ...client,
+    sleeveCashBalances,
+    cash: sumSleeveCashBalances(sleeveCashBalances)
+  };
+}
+
+function adjustSleeveCashBalance(client: ClientAccount, sleeveId: string, delta: number) {
+  return setSleeveCashBalance(client, sleeveId, getSleeveCashBalance(client, sleeveId) + delta);
 }
 
 function emptyQuestionState(): ActiveQuestionState {
@@ -331,9 +396,16 @@ function remapSleeveAssignments(
     }
   });
 
+  const nextSleeveCashBalances = { ...client.sleeveCashBalances };
+  const transferredCash = nextSleeveCashBalances[fromSleeveId] ?? 0;
+  nextSleeveCashBalances[fromSleeveId] = 0;
+  nextSleeveCashBalances[toSleeveId] = Number(((nextSleeveCashBalances[toSleeveId] ?? 0) + transferredCash).toFixed(2));
+
   return {
     client: {
       ...client,
+      sleeveCashBalances: nextSleeveCashBalances,
+      cash: sumSleeveCashBalances(nextSleeveCashBalances),
       holdingAccountMap: nextHoldingMap,
       shortHoldingAccountMap: nextShortHoldingMap
     },
@@ -385,6 +457,58 @@ function applyAccountTransferChoice(
     feedback: option.outcome,
     movedLongCount: 0,
     movedShortCount: 0
+  };
+}
+
+function applyOperationsRequestChoice(
+  client: ClientAccount,
+  request: OperationsRequestState,
+  optionId: string,
+  tickers: GameState["tickers"]
+) {
+  const option = request.options.find((entry) => entry.id === optionId);
+
+  if (!option) {
+    return {
+      client,
+      feedback: "The service request could not be matched to a valid action."
+    };
+  }
+
+  const nextCash = Math.max(0, client.cash + (option.cashDelta ?? 0));
+  const nextClient = updateClientNarrative(
+    setSleeveCashBalance(client, clientPrimarySleeveId(client), nextCash),
+    tickers,
+    option.trustDelta,
+    option.outcome
+  );
+
+  return {
+    client: nextClient,
+    feedback: option.outcome
+  };
+}
+
+function applySupervisionChoice(
+  client: ClientAccount,
+  request: SupervisionRequestState,
+  optionId: string,
+  tickers: GameState["tickers"]
+) {
+  const option = request.options.find((entry) => entry.id === optionId);
+
+  if (!option) {
+    return {
+      client,
+      feedback: "The supervisory review could not be matched to a valid action.",
+      secDelta: 0
+    };
+  }
+
+  return {
+    client: updateClientNarrative(client, tickers, option.trustDelta, option.outcome),
+    feedback: option.outcome,
+    secDelta: option.secDelta
   };
 }
 
@@ -581,10 +705,15 @@ function resolveMarginPressureForClients(
     }
 
     const liquidationValue = Math.max(0, computeClientAum(client, tickers));
+    const primarySleeveId = clientPrimarySleeveId(client);
+    const nextSleeveCashBalances = Object.fromEntries(
+      client.accountSleeves.map((sleeve) => [sleeve.id, sleeve.id === primarySleeveId ? liquidationValue : 0])
+    ) as Record<string, number>;
     alerts.push(`${client.name}: forced liquidation executed after an unresolved margin call.`);
     return {
       ...client,
       cash: liquidationValue,
+      sleeveCashBalances: nextSleeveCashBalances,
       holdings: {},
       shortHoldings: {},
       marginDebt: 0,
@@ -655,6 +784,23 @@ function buildTradeFeedback(title: string, detail: string, tone: "positive" | "w
   return { title, detail, tone };
 }
 
+function buildSuitabilityCoachingBullets(client: ClientAccount, ticker: GameState["tickers"][string]) {
+  const bullets = [
+    `Client equity lane: ${client.investmentPolicy.equityRangeLabel ?? "Policy-led allocation range"}`,
+    `Selected asset: ${ticker.name} | ${ticker.category === "stocks" || ticker.category === "funds" ? `Beta ${(ticker.beta ?? 0).toFixed(2)}` : ticker.category}`
+  ];
+
+  if (client.riskProfile === "Conservative") {
+    bullets.push("Better fit examples: diversified dividend funds, short-duration bonds, balanced funds, or high-quality large-cap income names.");
+  } else if (client.riskProfile === "Moderate") {
+    bullets.push("Better fit examples: balanced funds, broad market funds, laddered bonds, or lower-volatility equity sleeves sized modestly.");
+  } else {
+    bullets.push("Better fit examples: diversified core equity funds, staged growth exposure, and position sizes that stay inside the IPS guardrails.");
+  }
+
+  return bullets;
+}
+
 function paymentsPerYear(frequency: "monthly" | "quarterly" | "semiannual" | "annual" | undefined) {
   switch (frequency) {
     case "monthly":
@@ -723,6 +869,28 @@ function applyDividendPayoutsToHoldings(
   };
 }
 
+function buildDividendCashBySleeve(
+  client: ClientAccount,
+  tickers: GameState["tickers"],
+  cycleNumber: number
+) {
+  const cashBySleeve: Record<string, number> = {};
+
+  Object.values(client.holdings).forEach((holding) => {
+    const ticker = tickers[holding.ticker];
+
+    if (!ticker || ticker.dividendPayoutType !== "cash" || !ticker.dividendYield || !shouldPayDividend(ticker, cycleNumber)) {
+      return;
+    }
+
+    const sleeveId = client.holdingAccountMap[holding.ticker] ?? clientPrimarySleeveId(client);
+    const payout = holding.shares * ticker.price * (ticker.dividendYield / paymentsPerYear(ticker.dividendFrequency));
+    cashBySleeve[sleeveId] = Number(((cashBySleeve[sleeveId] ?? 0) + payout).toFixed(2));
+  });
+
+  return cashBySleeve;
+}
+
 function applyDividendPayouts(
   clients: ClientAccount[],
   personalCash: number,
@@ -733,9 +901,16 @@ function applyDividendPayouts(
   const personalPayout = applyDividendPayoutsToHoldings(personalHoldings, tickers, cycleNumber);
   const nextClients = clients.map((client) => {
     const payout = applyDividendPayoutsToHoldings(client.holdings, tickers, cycleNumber);
+    const cashBySleeve = buildDividendCashBySleeve(client, tickers, cycleNumber);
+    const nextSleeveCashBalances = { ...client.sleeveCashBalances };
+    Object.entries(cashBySleeve).forEach(([sleeveId, amount]) => {
+      nextSleeveCashBalances[sleeveId] = Number(((nextSleeveCashBalances[sleeveId] ?? 0) + amount).toFixed(2));
+    });
+
     return {
       ...client,
-      cash: Number((client.cash + payout.cashDividendUsd).toFixed(2)),
+      sleeveCashBalances: nextSleeveCashBalances,
+      cash: sumSleeveCashBalances(nextSleeveCashBalances),
       holdings: payout.holdings
     };
   });
@@ -764,6 +939,15 @@ function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]
       marginDebt: client.marginDebt ?? 0,
       marginCall: client.marginCall ?? false,
       accountSleeves: Array.isArray(client.accountSleeves) && client.accountSleeves.length > 0 ? client.accountSleeves : template.accountSleeves,
+      sleeveCashBalances: normalizeSleeveCashBalances(
+        {
+          accountSleeves: Array.isArray(client.accountSleeves) && client.accountSleeves.length > 0 ? client.accountSleeves : template.accountSleeves,
+          startingAum: client.startingAum ?? template.startingAum,
+          cash: client.cash ?? template.cash
+        },
+        (client as ClientAccount).sleeveCashBalances,
+        template.sleeveCashBalances
+      ),
       holdingAccountMap: client.holdingAccountMap ?? {},
       shortHoldingAccountMap: client.shortHoldingAccountMap ?? {},
       insuranceNeeds: Array.isArray(client.insuranceNeeds) ? client.insuranceNeeds : template.insuranceNeeds,
@@ -796,6 +980,7 @@ function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]
       mandateTargets: Array.isArray(client.mandateTargets) ? client.mandateTargets : template.mandateTargets,
       watchouts: Array.isArray(client.watchouts) ? client.watchouts : template.watchouts
     };
+    mergedClient.cash = sumSleeveCashBalances(mergedClient.sleeveCashBalances);
     const mandate = buildMandateSnapshot(mergedClient, tickers);
     return {
       ...mergedClient,
@@ -984,6 +1169,7 @@ function buildFreshDifficultyState(
     histories,
     currentEvent,
     cycleNumber: 1,
+    workflowCooldownUntilCycle: 1,
     lastMarketRefreshAt: Date.now(),
     lastCycleSummary: buildCycleSummary(tickers, 1, currentEvent),
     activeCycleRecap: null,
@@ -1010,6 +1196,9 @@ function buildFreshDifficultyState(
     activeInsuranceDialogue: null,
     activeClientMeeting: null,
     activeAccountTransferRequest: null,
+    activeOperationsRequest: null,
+    activeRecommendationDialogue: null,
+    activeSupervisionRequest: null,
     activeDocumentationPrompt: null,
     activeBehaviorEvent: null
   };
@@ -1039,6 +1228,13 @@ type GameState = GameStateShape & {
   closeClientMeeting: () => void;
   resolveAccountTransferRequest: (optionId: string) => void;
   closeAccountTransferRequest: () => void;
+  resolveOperationsRequest: (optionId: string) => void;
+  closeOperationsRequest: () => void;
+  startRecommendationDialogue: (clientId: string, recommendationId: string) => void;
+  resolveRecommendationDialogue: (optionId: string) => void;
+  closeRecommendationDialogue: () => void;
+  resolveSupervisionRequest: (optionId: string) => void;
+  closeSupervisionRequest: () => void;
   updateDocumentationNote: (value: string) => void;
   saveDocumentationNote: () => void;
   dismissDocumentationPrompt: () => void;
@@ -1093,6 +1289,7 @@ type PersistedGameSnapshot = Pick<
   | "histories"
   | "currentEvent"
   | "cycleNumber"
+  | "workflowCooldownUntilCycle"
   | "lastMarketRefreshAt"
   | "lastCycleSummary"
   | "activeCycleRecap"
@@ -1124,6 +1321,7 @@ function hydrateSnapshotMarketState(snapshot: PersistedGameSnapshot): PersistedG
     snapshot.selectedTicker
   );
   const cycleNumber = Math.max(1, snapshot.cycleNumber ?? 1);
+  const workflowCooldownUntilCycle = Math.max(1, snapshot.workflowCooldownUntilCycle ?? 1);
   const selectedChartPeriod = snapshot.selectedChartPeriod ?? "current";
   const gameDateIso = snapshot.gameDateIso ?? createInitialMarketDate();
   const hydratedTickers = refreshCallableBondTerms(marketState.tickers, cycleNumber);
@@ -1133,6 +1331,7 @@ function hydrateSnapshotMarketState(snapshot: PersistedGameSnapshot): PersistedG
     ...marketState,
     selectedChartPeriod,
     gameDateIso,
+    workflowCooldownUntilCycle,
     interestRates: buildInterestRateSnapshot(cycleNumber, selectedChartPeriod),
     tickers: hydratedTickers,
     personalShortHoldings: snapshot.personalShortHoldings ?? {},
@@ -1265,6 +1464,7 @@ function buildSnapshot(state: GameState): PersistedGameSnapshot {
     histories: state.histories,
     currentEvent: state.currentEvent,
     cycleNumber: state.cycleNumber,
+    workflowCooldownUntilCycle: state.workflowCooldownUntilCycle,
     lastMarketRefreshAt: state.lastMarketRefreshAt,
     lastCycleSummary: state.lastCycleSummary,
     activeCycleRecap: state.activeCycleRecap,
@@ -1392,6 +1592,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
                 activeCycleRecap: null,
                 activeClientMeeting: null,
                 activeAccountTransferRequest: null,
+                activeOperationsRequest: null,
+                activeRecommendationDialogue: null,
+                activeSupervisionRequest: null,
                 activeDocumentationPrompt: null,
                 activeBehaviorEvent: null
               }
@@ -1515,6 +1718,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         totalAum: computeTotalAum(restoredClients, stored.snapshot.tickers),
         activeClientMeeting: null,
         activeAccountTransferRequest: null,
+        activeOperationsRequest: null,
+        activeRecommendationDialogue: null,
+        activeSupervisionRequest: null,
         activeDocumentationPrompt: null,
         activeBehaviorEvent: null,
         questionBankStatus: "idle",
@@ -1814,6 +2020,167 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       });
     },
     closeAccountTransferRequest: () => commit({ activeAccountTransferRequest: null }, { touchSave: false }),
+    resolveOperationsRequest: (optionId) => {
+      const state = get();
+      const request = state.activeOperationsRequest;
+
+      if (!request || request.resolved) {
+        return;
+      }
+
+      const client = state.clients.find((entry) => entry.id === request.clientId);
+      if (!client) {
+        commit({ activeOperationsRequest: null });
+        return;
+      }
+
+      const chosen = request.options.find((entry) => entry.id === optionId);
+      const result = applyOperationsRequestChoice(client, request, optionId, state.tickers);
+      const nextClients = state.clients.map((entry) => (entry.id === client.id ? result.client : entry));
+
+      commit({
+        clients: nextClients,
+        totalAum: computeTotalAum(nextClients, state.tickers),
+        activeOperationsRequest: {
+          ...request,
+          resolved: true,
+          selectedOptionId: optionId,
+          feedback: result.feedback
+        },
+        tradeFeedback: {
+          ...buildTradeFeedback(
+            `${client.name} service request`,
+            result.feedback,
+            (chosen?.trustDelta ?? 0) >= 0 ? "positive" : "warning"
+          ),
+          bullets: chosen?.cashDelta
+            ? [`Client cash moved ${chosen.cashDelta >= 0 ? "up" : "down"} by ${formatCurrency(Math.abs(chosen.cashDelta))}`]
+            : []
+        },
+        activeDocumentationPrompt: chosen
+          ? buildDocumentationPrompt(
+              client.id,
+              `${client.name} service workflow note`,
+              "Document the maintenance or service request, the action taken, and any follow-up tasks that remain open.",
+              chosen.noteHint ?? `${result.feedback} Record the operational change, the client request, and the next service checkpoint.`
+            )
+          : state.activeDocumentationPrompt
+      });
+    },
+    closeOperationsRequest: () => commit({ activeOperationsRequest: null }, { touchSave: false }),
+    startRecommendationDialogue: (clientId, recommendationId) => {
+      const state = get();
+      const client = state.clients.find((entry) => entry.id === clientId);
+
+      if (!client) {
+        return;
+      }
+
+      const dialogue = getRecommendationDialogue(client, recommendationId, state.activeDifficulty);
+      if (!dialogue) {
+        return;
+      }
+
+      commit({
+        activeRecommendationDialogue: dialogue
+      }, { touchSave: false });
+    },
+    resolveRecommendationDialogue: (optionId) => {
+      const state = get();
+      const dialogue = state.activeRecommendationDialogue;
+
+      if (!dialogue || dialogue.resolved) {
+        return;
+      }
+
+      const client = state.clients.find((entry) => entry.id === dialogue.clientId);
+      const option = dialogue.options.find((entry) => entry.id === optionId);
+
+      if (!client || !option) {
+        commit({ activeRecommendationDialogue: null }, { touchSave: false });
+        return;
+      }
+
+      const updatedClient = appendClientNote(
+        updateClientNarrative(client, state.tickers, option.trustDelta, option.outcome),
+        `${dialogue.title}: ${option.followUpTask}`
+      );
+      const nextClients = state.clients.map((entry) => (entry.id === client.id ? updatedClient : entry));
+
+      commit({
+        clients: nextClients,
+        totalAum: computeTotalAum(nextClients, state.tickers),
+        activeRecommendationDialogue: {
+          ...dialogue,
+          resolved: true,
+          selectedOptionId: optionId,
+          accepted: option.accepted,
+          feedback: option.outcome
+        },
+        tradeFeedback: {
+          ...buildTradeFeedback(
+            `${client.name} recommendation`,
+            option.outcome,
+            option.accepted ? "positive" : option.trustDelta >= 0 ? "neutral" : "warning"
+          ),
+          bullets: [option.followUpTask]
+        },
+        activeDocumentationPrompt: buildDocumentationPrompt(
+          client.id,
+          `${client.name} recommendation note`,
+          "Document the recommendation, the client objection or question, the response you gave, and the follow-up task.",
+          `${option.outcome} Follow-up: ${option.followUpTask}.`
+        )
+      });
+    },
+    closeRecommendationDialogue: () => commit({ activeRecommendationDialogue: null }, { touchSave: false }),
+    resolveSupervisionRequest: (optionId) => {
+      const state = get();
+      const request = state.activeSupervisionRequest;
+
+      if (!request || request.resolved) {
+        return;
+      }
+
+      const client = state.clients.find((entry) => entry.id === request.clientId);
+      const option = request.options.find((entry) => entry.id === optionId);
+
+      if (!client || !option) {
+        commit({ activeSupervisionRequest: null }, { touchSave: false });
+        return;
+      }
+
+      const result = applySupervisionChoice(client, request, optionId, state.tickers);
+      const nextClients = state.clients.map((entry) => (entry.id === client.id ? result.client : entry));
+      const nextSecMeter = Math.max(0, Math.min(100, state.secMeterLevel + result.secDelta));
+
+      commit({
+        clients: nextClients,
+        secMeterLevel: nextSecMeter,
+        totalAum: computeTotalAum(nextClients, state.tickers),
+        activeSupervisionRequest: {
+          ...request,
+          resolved: true,
+          selectedOptionId: optionId,
+          feedback: result.feedback
+        },
+        tradeFeedback: {
+          ...buildTradeFeedback(
+            `${client.name} supervision review`,
+            result.feedback,
+            result.secDelta <= 0 ? "positive" : "warning"
+          ),
+          bullets: [`SEC scrutiny ${result.secDelta >= 0 ? "+" : ""}${result.secDelta}`]
+        },
+        activeDocumentationPrompt: buildDocumentationPrompt(
+          client.id,
+          `${client.name} supervision note`,
+          "Document the supervisory issue, the remediation decision, and how the account will be monitored going forward.",
+          option.noteHint ?? `${result.feedback} Supervisory follow-up should track suitability, concentration, and documentation discipline.`
+        )
+      });
+    },
+    closeSupervisionRequest: () => commit({ activeSupervisionRequest: null }, { touchSave: false }),
     updateDocumentationNote: (value) => {
       const prompt = get().activeDocumentationPrompt;
       if (!prompt) {
@@ -2193,15 +2560,17 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           return entry;
         }
 
-        const nextClient: ClientAccount = {
+        let nextClient: ClientAccount = {
           ...entry,
           holdings: { ...entry.holdings },
           shortHoldings: { ...(entry.shortHoldings ?? {}) },
+          sleeveCashBalances: { ...entry.sleeveCashBalances },
           holdingAccountMap: { ...(entry.holdingAccountMap ?? {}) },
           shortHoldingAccountMap: { ...(entry.shortHoldingAccountMap ?? {}) }
         };
 
         let nextCash = nextClient.cash;
+        let nextSleeveCash = getSleeveCashBalance(nextClient, accountId);
         let nextDebt = nextClient.marginDebt ?? 0;
         const currentLong = nextClient.holdings[ticker];
         const currentShort = nextClient.shortHoldings[ticker];
@@ -2212,17 +2581,21 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           if (existingLongAccount && existingLongAccount !== accountId) {
             return entry;
           }
+          const existingShortAccount = nextClient.shortHoldingAccountMap[ticker];
+          if (currentShort && existingShortAccount && existingShortAccount !== accountId) {
+            return entry;
+          }
           const coverShares = Math.min(quantity, currentShort?.shares ?? 0);
           if (coverShares > 0) {
             const coverCost = coverShares * asset.price;
-            if (mode === "cash" && coverCost > nextCash) {
+            if (mode === "cash" && coverCost > nextSleeveCash) {
               return entry;
             }
-            if (coverCost > nextCash) {
-              nextDebt += coverCost - nextCash;
-              nextCash = 0;
-            } else {
-              nextCash -= coverCost;
+            const sleeveCashUsed = Math.min(nextSleeveCash, coverCost);
+            nextSleeveCash -= sleeveCashUsed;
+            nextCash -= sleeveCashUsed;
+            if (coverCost > sleeveCashUsed) {
+              nextDebt += coverCost - sleeveCashUsed;
             }
             const remainingShort = (currentShort?.shares ?? 0) - coverShares;
             if (remainingShort <= 0) {
@@ -2236,7 +2609,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           const buyShares = quantity - coverShares;
           if (buyShares > 0) {
             const buyCost = buyShares * asset.price;
-            if (mode === "cash" && buyCost > nextCash) {
+            if (mode === "cash" && buyCost > nextSleeveCash) {
               return entry;
             }
             if (mode === "margin") {
@@ -2245,11 +2618,11 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
                 return entry;
               }
             }
-            if (buyCost > nextCash) {
-              nextDebt += buyCost - nextCash;
-              nextCash = 0;
-            } else {
-              nextCash -= buyCost;
+            const sleeveCashUsed = Math.min(nextSleeveCash, buyCost);
+            nextSleeveCash -= sleeveCashUsed;
+            nextCash -= sleeveCashUsed;
+            if (buyCost > sleeveCashUsed) {
+              nextDebt += buyCost - sleeveCashUsed;
             }
             const previousShares = nextClient.holdings[ticker]?.shares ?? 0;
             const previousCost = nextClient.holdings[ticker]?.averageCost ?? asset.price;
@@ -2261,15 +2634,22 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             nextClient.holdingAccountMap[ticker] = accountId;
           }
         } else {
+          const existingLongAccount = nextClient.holdingAccountMap[ticker];
+          if (currentLong && existingLongAccount && existingLongAccount !== accountId) {
+            return entry;
+          }
           const existingShortAccount = nextClient.shortHoldingAccountMap[ticker];
           if (existingShortAccount && existingShortAccount !== accountId) {
             return entry;
           }
           const sellableLongShares = Math.min(quantity, currentLong?.shares ?? 0);
           if (sellableLongShares > 0) {
-            const applied = applySaleProceedsToDebt(nextCash, nextDebt, sellableLongShares * asset.price);
-            nextCash = applied.cash;
-            nextDebt = applied.marginDebt;
+            const proceeds = sellableLongShares * asset.price;
+            const debtReduction = Math.min(nextDebt, proceeds);
+            nextDebt -= debtReduction;
+            const netCashCredit = proceeds - debtReduction;
+            nextCash += netCashCredit;
+            nextSleeveCash += netCashCredit;
             const remainingLong = (currentLong?.shares ?? 0) - sellableLongShares;
             if (remainingLong <= 0) {
               delete nextClient.holdings[ticker];
@@ -2298,10 +2678,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             };
             nextClient.shortHoldingAccountMap[ticker] = accountId;
             nextCash += shortValue;
+            nextSleeveCash += shortValue;
             shortSale = true;
           }
         }
 
+        nextClient = setSleeveCashBalance(nextClient, accountId, nextSleeveCash);
         nextClient.cash = nextCash;
         nextClient.marginDebt = nextDebt;
         const marginStatus = accountMarginRatio(nextCash, nextClient.holdings, nextClient.shortHoldings, nextDebt, state.tickers);
@@ -2356,7 +2738,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
                 : "The trade executed, but it triggered suitability scrutiny for this client profile.",
               effectiveDecision.suitable ? "positive" : "warning"
             ),
-            bullets: effectiveDecision.suitable ? [] : effectiveDecision.reasons.slice(0, 3)
+            bullets: effectiveDecision.suitable
+              ? []
+              : [...effectiveDecision.reasons.slice(0, 3), ...buildSuitabilityCoachingBullets(client, asset)]
           },
           activeDocumentationPrompt: !effectiveDecision.suitable
             ? buildDocumentationPrompt(
@@ -2389,6 +2773,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         get().activeCycleRecap ||
         get().activeClientMeeting ||
         get().activeAccountTransferRequest ||
+        get().activeOperationsRequest ||
+        get().activeRecommendationDialogue ||
+        get().activeSupervisionRequest ||
         get().activeBehaviorEvent ||
         get().activeDocumentationPrompt
       ) {
@@ -2414,6 +2801,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         state.activeCycleRecap ||
         state.activeClientMeeting ||
         state.activeAccountTransferRequest ||
+        state.activeOperationsRequest ||
+        state.activeRecommendationDialogue ||
+        state.activeSupervisionRequest ||
         state.activeBehaviorEvent ||
         state.activeDocumentationPrompt
       ) {
@@ -2493,10 +2883,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           nextMarket.tickers,
           state.revenueSnapshot.trailingCycleRevenue
         );
+        const workflowOpen = nextCycleNumber >= state.workflowCooldownUntilCycle;
         const nextActiveClientId = clientCycleState.updatedClients.some((client) => client.id === state.activeClientId)
           ? state.activeClientId
           : clientCycleState.updatedClients[0]?.id ?? null;
         const meetingCandidate =
+          workflowOpen &&
           !state.auditTriggered &&
           !state.activeInsuranceDialogue &&
           !state.activeInsiderEvent &&
@@ -2505,6 +2897,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const behaviorCandidate =
+          workflowOpen &&
           !meetingCandidate &&
           !state.auditTriggered &&
           !state.activeInsuranceDialogue &&
@@ -2514,6 +2907,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
             : null;
         const transferCandidate =
+          workflowOpen &&
           !meetingCandidate &&
           !behaviorCandidate &&
           !state.auditTriggered &&
@@ -2526,6 +2920,46 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         const transferRequest = transferCandidate
           ? getAccountTransferRequest(transferCandidate, state.activeDifficulty, nextCycleNumber)
           : null;
+        const operationsCandidate =
+          workflowOpen &&
+          !meetingCandidate &&
+          !behaviorCandidate &&
+          !transferRequest &&
+          !state.auditTriggered &&
+          !state.activeInsuranceDialogue &&
+          !state.activeInsiderEvent &&
+          nextActiveClientId &&
+          Math.random() < 0.14
+            ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
+            : null;
+        const operationsRequest = operationsCandidate
+          ? getOperationsRequest(operationsCandidate, state.activeDifficulty, nextCycleNumber)
+          : null;
+        const supervisionCandidate =
+          workflowOpen &&
+          !meetingCandidate &&
+          !behaviorCandidate &&
+          !transferRequest &&
+          !operationsRequest &&
+          !state.auditTriggered &&
+          !state.activeInsuranceDialogue &&
+          !state.activeInsiderEvent &&
+          !state.activeRecommendationDialogue &&
+          nextActiveClientId &&
+          (
+            state.secMeterLevel >= 40 ||
+            clientCycleState.updatedClients.some((client) => client.status === "at-risk" && client.id === nextActiveClientId)
+          ) &&
+          Math.random() < 0.22
+            ? clientCycleState.updatedClients.find((client) => client.id === nextActiveClientId) ?? null
+            : null;
+        const supervisionRequest = supervisionCandidate
+          ? buildSupervisionRequest(supervisionCandidate, nextCycleNumber)
+          : null;
+        const nextWorkflowCooldownUntilCycle =
+          meetingCandidate || behaviorCandidate || transferRequest || operationsRequest || supervisionRequest
+            ? nextCycleNumber + 1
+            : state.workflowCooldownUntilCycle;
 
         commit((current) => ({
           timerSeconds: 15 * 60,
@@ -2534,6 +2968,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           histories: nextMarket.histories,
           currentEvent: currentEventTitle,
           cycleNumber: nextCycleNumber,
+          workflowCooldownUntilCycle: nextWorkflowCooldownUntilCycle,
           lastMarketRefreshAt: Date.now(),
           lastCycleSummary: nextCycleSummary,
           activeCycleRecap: nextCycleSummary,
@@ -2559,6 +2994,8 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
           activeInsiderEvent: nextInsiderEvent,
           activeClientMeeting: meetingCandidate ? getClientMeetingScenario(meetingCandidate, state.activeDifficulty, nextCycleNumber) : current.activeClientMeeting,
           activeAccountTransferRequest: transferRequest ?? current.activeAccountTransferRequest,
+          activeOperationsRequest: operationsRequest ?? current.activeOperationsRequest,
+          activeSupervisionRequest: supervisionRequest ?? current.activeSupervisionRequest,
           activeBehaviorEvent: behaviorCandidate ? getBehaviorScenario(behaviorCandidate, state.activeDifficulty, nextCycleNumber) : current.activeBehaviorEvent
         }));
         return;
@@ -2712,6 +3149,9 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.activeInsuranceDialogue = null;
     state.activeClientMeeting = null;
     state.activeAccountTransferRequest = null;
+    state.activeOperationsRequest = null;
+    state.activeRecommendationDialogue = null;
+    state.activeSupervisionRequest = null;
     state.activeDocumentationPrompt = null;
     state.activeBehaviorEvent = null;
     state.personalShortHoldings = state.personalShortHoldings ?? {};
@@ -2736,6 +3176,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.lastMarketRefreshAt = state.lastMarketRefreshAt ?? Date.now();
     state.lastCycleSummary = buildCycleSummary(state.tickers, state.cycleNumber, state.currentEvent);
     state.activeCycleRecap = null;
+    state.workflowCooldownUntilCycle = Math.max(1, state.workflowCooldownUntilCycle ?? 1);
     state.difficultySessions = state.difficultySessions ?? {};
     state.questionTracker = {
       recentlyAsked: state.questionTracker?.recentlyAsked ?? [],
@@ -2783,6 +3224,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     histories: state.histories,
     currentEvent: state.currentEvent,
     cycleNumber: state.cycleNumber,
+    workflowCooldownUntilCycle: state.workflowCooldownUntilCycle,
     lastMarketRefreshAt: state.lastMarketRefreshAt,
     lastCycleSummary: state.lastCycleSummary,
     activeCycleRecap: state.activeCycleRecap,

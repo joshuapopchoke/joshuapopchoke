@@ -184,6 +184,15 @@ h3 { font-size: 0.78rem; }
   align-content: start;
 }
 .ribbon-item--calendar { width: 215px; }
+.ribbon-item--planner-tools {
+  width: 170px;
+  min-height: 72px;
+  align-content: start;
+}
+.planner-tools-btn {
+  margin-top: 4px;
+  width: 100%;
+}
 
 .ribbon-item--coach strong,
 .ribbon-item--coach small {
@@ -645,6 +654,41 @@ textarea.documentation-textarea {
   font-size: 0.62rem;
   line-height: 1.2;
 }
+.planner-tools-modal {
+  width: min(980px, 100%);
+}
+.planner-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.planner-tool-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(16, 34, 52, 0.58);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.planner-tool-card span {
+  color: var(--accent);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.planner-tool-card strong {
+  font-size: 0.76rem;
+}
+.planner-tool-card small {
+  color: var(--muted);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+.planner-tool-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
 .peer-table-title {
   color: var(--accent);
   font-size: 0.6rem;
@@ -915,6 +959,8 @@ textarea.documentation-textarea {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .research-callout-grid { grid-template-columns: 1fr; }
   .comparison-grid { grid-template-columns: 1fr; }
+  .planner-tools-grid { grid-template-columns: 1fr; }
+  .planner-tool-inputs { grid-template-columns: 1fr; }
   .portfolio-summary-grid { grid-template-columns: 1fr; }
   .portfolio-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
