@@ -3,6 +3,13 @@ import { buildPolicyReviewSnapshot } from "../engine/policyReviewEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
 import { useGameStore } from "../store/gameStore";
 
+type ClientRosterMode = "default" | "mortgage" | "lending";
+
+interface ClientRosterProps {
+  mode?: ClientRosterMode;
+  showPlayerAccount?: boolean;
+}
+
 function formatCurrency(value: number) {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -69,7 +76,7 @@ function crmCadenceDetail(cycleNumber: number, clientId: string) {
   return "No urgent CRM action is due right now.";
 }
 
-export function ClientRoster() {
+export function ClientRoster({ mode = "default", showPlayerAccount = true }: ClientRosterProps) {
   const clients = useGameStore((state) => state.clients);
   const personalPortfolioUsd = useGameStore((state) => state.personalPortfolioUsd);
   const personalHoldings = useGameStore((state) => state.personalHoldings);
@@ -84,6 +91,15 @@ export function ClientRoster() {
   const cycleNumber = useGameStore((state) => state.cycleNumber);
   const selectClient = useGameStore((state) => state.selectClient);
   const playerBeta = calculatePortfolioBeta(personalHoldings, personalShortHoldings, tickers);
+  const visibleClients = clients.filter((client) => {
+    if (mode === "mortgage") {
+      return client.lendingProfile.underwritingTrack === "Mortgage" || client.mortgageProfile.occupancy !== "Not Applicable";
+    }
+    if (mode === "lending") {
+      return client.lendingProfile.underwritingTrack !== "Institutional" || client.id === "institutional";
+    }
+    return true;
+  });
 
   return (
     <section className="panel">
@@ -95,7 +111,7 @@ export function ClientRoster() {
       </div>
       <div className="client-list">
         <div className="client-section-label">Client Accounts</div>
-        {clients.map((client) => {
+        {visibleClients.map((client) => {
           const accountUsd = computeAccountUsd(client, tickers);
           const accountDelta = accountUsd - client.startingAum;
           const accountBeta = calculatePortfolioBeta(client.holdings, client.shortHoldings ?? {}, tickers);
@@ -124,65 +140,92 @@ export function ClientRoster() {
               <span>{client.riskProfile}</span>
               <span className="client-card-goal">{client.goal}</span>
               <span className="client-card-money">{formatCurrency(accountUsd)}</span>
-              <span className={accountDelta >= 0 ? "up" : "down"}>
-                {accountDelta >= 0 ? "+" : "-"}
-                {formatCurrency(Math.abs(accountDelta))}
-              </span>
-              <span className="client-card-trust">{formatBeta(accountBeta)} | {betaFitLabel(accountBeta, client.riskProfile)}</span>
-              <span className="client-card-trust">
-                Cash flow: {formatCompactUsd(client.cashFlow.monthlyIncome)} in | {formatCompactUsd(client.cashFlow.monthlyExpenses + client.cashFlow.monthlyDebtPayments)} out
-              </span>
-              <span className="client-card-trust">
-                Tax: {client.taxProfile.taxBracketLabel} | Liquidity: {client.cashFlow.nearTermLiquidityNeed}
-              </span>
-              <span className="client-card-trust">
-                Revenue: {formatCompactUsd(revenue)}/yr | {client.revenueProfile.serviceTier}
-              </span>
-              <span className="client-card-trust">
-                CRM: {client.crmProfile.nextReviewWindow} | {crmCadence}
-              </span>
-              <span className="client-card-trust">
-                Follow-up: {client.crmProfile.nextTask}
-              </span>
-              <span className="client-card-note">{crmDetail}</span>
-              <span className="client-card-trust">
-                IPS: {client.investmentPolicy.equityRangeLabel ?? "Policy active"} | {policyReview.dueLabel}
-              </span>
-              {retirementIncome.applicable ? (
-                <span className="client-card-trust">
-                  {retirementIncome.mode === "spending-rule"
-                    ? `Spending support: ${(retirementIncome.withdrawalRate * 100).toFixed(1)}% draw | ${retirementIncome.sustainabilityLabel}`
-                    : `Income gap: ${formatCurrency(retirementIncome.monthlyShortfall)}/mo | ${retirementIncome.runwayLabel}`}
-                </span>
-              ) : null}
-              <span className="client-card-trust">
-                Benefits: {client.benefitsProfile.primaryPlan}
-              </span>
-              <span className="client-card-trust">
-                Account home: {client.accountStructure.registration}
-              </span>
-              {client.educationPlanning.active ? (
-                <span className="client-card-trust">
-                  Education: {client.educationPlanning.targetYears}
-                </span>
-              ) : null}
-              <span className="client-card-trust">
-                Estate: {client.estateProfile.coreDocuments[0]} | {client.estateProfile.beneficiaryReview}
-              </span>
-              <span className="client-card-trust">
-                Supervision: {client.supervisionProfile.reviewLevel}
-              </span>
-              <span className="client-card-trust">
-                Insurance gap: {client.insuranceGapScore}/100 | {client.insuranceCoverage.length}/{client.insuranceNeeds.length} addressed
-              </span>
-              {(client.marginDebt > 0 || client.marginCall || Object.keys(client.shortHoldings ?? {}).length > 0) ? (
-                <span className={client.marginCall ? "down" : "client-card-trust"}>
-                  Margin: {formatCurrency(client.marginDebt ?? 0)} debt | {Object.keys(client.shortHoldings ?? {}).length} short | {client.marginCall ? "Call active" : "Stable"}
-                </span>
-              ) : null}
-              <span className="client-card-trust">Trust: {client.trustScore}/100 | {relationshipBand(client.trustScore)}</span>
-              <span className="client-card-note">{client.advisorNote}</span>
-              <span className="client-card-note">{policyReview.ipsAlignmentNote}</span>
+              {mode === "mortgage" ? (
+                <>
+                  <span className="client-card-trust">
+                    Credit {client.creditProfile.score} | {client.creditProfile.scoreBand} | {client.mortgageProfile.occupancy}
+                  </span>
+                  <span className="client-card-trust">
+                    Housing: {formatCompactUsd(client.debtProfile.housingPayment)} /mo | Rate {(client.debtProfile.mortgageRate * 100).toFixed(2)}% | {client.debtProfile.mortgageTermYearsRemaining} yrs
+                  </span>
+                  <span className="client-card-trust">
+                    Debt: {formatCompactUsd(client.cashFlow.monthlyDebtPayments)} /mo | Reserve target {client.cashFlow.emergencyReserveMonths} months
+                  </span>
+                  <span className="client-card-note">{client.lendingProfile.requestedLoanPurpose}</span>
+                </>
+              ) : mode === "lending" ? (
+                <>
+                  <span className="client-card-trust">
+                    Credit {client.creditProfile.score} | DTI {(client.cashFlow.monthlyIncome > 0 ? ((client.cashFlow.monthlyDebtPayments + client.debtProfile.housingPayment) / client.cashFlow.monthlyIncome) * 100 : 0).toFixed(0)}%
+                  </span>
+                  <span className="client-card-trust">
+                    Track: {client.lendingProfile.underwritingTrack} | Collateral: {client.lendingProfile.collateralStrength}
+                  </span>
+                  <span className="client-card-note">{client.lendingProfile.requestedLoanPurpose}</span>
+                </>
+              ) : (
+                <>
+                  <span className={accountDelta >= 0 ? "up" : "down"}>
+                    {accountDelta >= 0 ? "+" : "-"}
+                    {formatCurrency(Math.abs(accountDelta))}
+                  </span>
+                  <span className="client-card-trust">{formatBeta(accountBeta)} | {betaFitLabel(accountBeta, client.riskProfile)}</span>
+                  <span className="client-card-trust">
+                    Cash flow: {formatCompactUsd(client.cashFlow.monthlyIncome)} in | {formatCompactUsd(client.cashFlow.monthlyExpenses + client.cashFlow.monthlyDebtPayments)} out
+                  </span>
+                  <span className="client-card-trust">
+                    Tax: {client.taxProfile.taxBracketLabel} | Liquidity: {client.cashFlow.nearTermLiquidityNeed}
+                  </span>
+                  <span className="client-card-trust">
+                    Revenue: {formatCompactUsd(revenue)}/yr | {client.revenueProfile.serviceTier}
+                  </span>
+                  <span className="client-card-trust">
+                    CRM: {client.crmProfile.nextReviewWindow} | {crmCadence}
+                  </span>
+                  <span className="client-card-trust">
+                    Follow-up: {client.crmProfile.nextTask}
+                  </span>
+                  <span className="client-card-note">{crmDetail}</span>
+                  <span className="client-card-trust">
+                    IPS: {client.investmentPolicy.equityRangeLabel ?? "Policy active"} | {policyReview.dueLabel}
+                  </span>
+                  {retirementIncome.applicable ? (
+                    <span className="client-card-trust">
+                      {retirementIncome.mode === "spending-rule"
+                        ? `Spending support: ${(retirementIncome.withdrawalRate * 100).toFixed(1)}% draw | ${retirementIncome.sustainabilityLabel}`
+                        : `Income gap: ${formatCurrency(retirementIncome.monthlyShortfall)}/mo | ${retirementIncome.runwayLabel}`}
+                    </span>
+                  ) : null}
+                  <span className="client-card-trust">
+                    Benefits: {client.benefitsProfile.primaryPlan}
+                  </span>
+                  <span className="client-card-trust">
+                    Account home: {client.accountStructure.registration}
+                  </span>
+                  {client.educationPlanning.active ? (
+                    <span className="client-card-trust">
+                      Education: {client.educationPlanning.targetYears}
+                    </span>
+                  ) : null}
+                  <span className="client-card-trust">
+                    Estate: {client.estateProfile.coreDocuments[0]} | {client.estateProfile.beneficiaryReview}
+                  </span>
+                  <span className="client-card-trust">
+                    Supervision: {client.supervisionProfile.reviewLevel}
+                  </span>
+                  <span className="client-card-trust">
+                    Insurance gap: {client.insuranceGapScore}/100 | {client.insuranceCoverage.length}/{client.insuranceNeeds.length} addressed
+                  </span>
+                  {(client.marginDebt > 0 || client.marginCall || Object.keys(client.shortHoldings ?? {}).length > 0) ? (
+                    <span className={client.marginCall ? "down" : "client-card-trust"}>
+                      Margin: {formatCurrency(client.marginDebt ?? 0)} debt | {Object.keys(client.shortHoldings ?? {}).length} short | {client.marginCall ? "Call active" : "Stable"}
+                    </span>
+                  ) : null}
+                  <span className="client-card-trust">Trust: {client.trustScore}/100 | {relationshipBand(client.trustScore)}</span>
+                  <span className="client-card-note">{client.advisorNote}</span>
+                  <span className="client-card-note">{policyReview.ipsAlignmentNote}</span>
+                </>
+              )}
               <div className="client-progress">
                 <div className="client-progress-track">
                   <div className="client-progress-fill" style={{ width: `${client.mandateScore}%` }} />
@@ -192,26 +235,30 @@ export function ClientRoster() {
             </button>
           );
         })}
-        <div className="client-section-label">Player Account</div>
-        <button
-          type="button"
-          className={`client-card player-card ${activeClientId === "player" ? "active" : ""}`}
-          disabled={questionBankStatus === "loading"}
-          onClick={() => void selectClient("player")}
-        >
-          <div className="client-card-top">
-            <span className="avatar player-avatar">P</span>
-            <span className="status-dot satisfied" />
-          </div>
-          <strong>Your Portfolio</strong>
-          <span>Self-Directed Trading</span>
-          <span className="client-card-money">Cash Available: {formatCurrency(personalPortfolioUsd)}</span>
-          <span>{Object.keys(personalHoldings).length} long | {Object.keys(personalShortHoldings).length} short</span>
-          <span className="client-card-trust">{formatBeta(playerBeta)} | self-directed risk</span>
-          <span className={personalMarginCall ? "down" : "client-card-trust"}>Margin Debt: {formatCurrency(personalMarginDebt)} | {personalMarginCall ? "Call active" : "Stable"}</span>
-          <span>Status: {playerTradeStatus}</span>
-          <span>Compliance: {playerComplianceLevel}%</span>
-        </button>
+        {showPlayerAccount ? (
+          <>
+            <div className="client-section-label">Player Account</div>
+            <button
+              type="button"
+              className={`client-card player-card ${activeClientId === "player" ? "active" : ""}`}
+              disabled={questionBankStatus === "loading"}
+              onClick={() => void selectClient("player")}
+            >
+              <div className="client-card-top">
+                <span className="avatar player-avatar">P</span>
+                <span className="status-dot satisfied" />
+              </div>
+              <strong>Your Portfolio</strong>
+              <span>Self-Directed Trading</span>
+              <span className="client-card-money">Cash Available: {formatCurrency(personalPortfolioUsd)}</span>
+              <span>{Object.keys(personalHoldings).length} long | {Object.keys(personalShortHoldings).length} short</span>
+              <span className="client-card-trust">{formatBeta(playerBeta)} | self-directed risk</span>
+              <span className={personalMarginCall ? "down" : "client-card-trust"}>Margin Debt: {formatCurrency(personalMarginDebt)} | {personalMarginCall ? "Call active" : "Stable"}</span>
+              <span>Status: {playerTradeStatus}</span>
+              <span>Compliance: {playerComplianceLevel}%</span>
+            </button>
+          </>
+        ) : null}
       </div>
     </section>
   );

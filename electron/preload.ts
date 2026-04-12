@@ -6,7 +6,7 @@ const electronAPI = {
   maximizeApp: () => ipcRenderer.send("maximize-app")
 };
 
-contextBridge.exposeInMainWorld("electronAPI", electronAPI);
+contextBridge.exposeInMainWorld("electronAPI", Object.freeze(electronAPI));
 
 declare global {
   interface Window {

@@ -50,6 +50,45 @@ export const CLIENTS: ClientAccount[] = [
       emergencyReserveMonths: 18,
       nearTermLiquidityNeed: "High"
     },
+    creditProfile: {
+      score: 782,
+      scoreBand: "Very Good",
+      utilizationPct: 8,
+      recentInquiries: 0,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Stable"
+    },
+    debtProfile: {
+      mortgageBalance: 0,
+      mortgageRate: 0,
+      mortgageTermYearsRemaining: 0,
+      propertyValue: 0,
+      housingPayment: 0,
+      creditCardBalance: 2400,
+      autoLoanBalance: 0,
+      studentLoanBalance: 0,
+      helocBalance: 0,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Not Applicable",
+      loanPreference: "Not Applicable",
+      refinanceHorizonMonths: 0,
+      pmiActive: false,
+      propertyTaxMonthly: 0,
+      homeownerInsuranceMonthly: 0,
+      closingCostSensitivity: "Moderate"
+    },
+    lendingProfile: {
+      underwritingTrack: "Consumer",
+      employmentStrength: "Moderate",
+      collateralStrength: "Strong",
+      businessCashFlowCoverage: null,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "Retirement liquidity reserve only"
+    },
     taxProfile: {
       filingStatus: "Single retiree",
       taxBracketLabel: "Moderate ordinary-income bracket",
@@ -184,6 +223,45 @@ export const CLIENTS: ClientAccount[] = [
       monthlyDebtPayments: 900,
       emergencyReserveMonths: 6,
       nearTermLiquidityNeed: "Moderate"
+    },
+    creditProfile: {
+      score: 744,
+      scoreBand: "Very Good",
+      utilizationPct: 19,
+      recentInquiries: 2,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Improving"
+    },
+    debtProfile: {
+      mortgageBalance: 285000,
+      mortgageRate: 0.068,
+      mortgageTermYearsRemaining: 28,
+      propertyValue: 385000,
+      housingPayment: 2480,
+      creditCardBalance: 5200,
+      autoLoanBalance: 14800,
+      studentLoanBalance: 18200,
+      helocBalance: 0,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Primary Residence",
+      loanPreference: "Fixed",
+      refinanceHorizonMonths: 60,
+      pmiActive: false,
+      propertyTaxMonthly: 410,
+      homeownerInsuranceMonthly: 125,
+      closingCostSensitivity: "Moderate"
+    },
+    lendingProfile: {
+      underwritingTrack: "Mortgage",
+      employmentStrength: "Strong",
+      collateralStrength: "Moderate",
+      businessCashFlowCoverage: null,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "Home upgrade and cash-flow flexibility"
     },
     taxProfile: {
       filingStatus: "Single W-2 earner",
@@ -320,6 +398,45 @@ export const CLIENTS: ClientAccount[] = [
       emergencyReserveMonths: 9,
       nearTermLiquidityNeed: "High"
     },
+    creditProfile: {
+      score: 724,
+      scoreBand: "Good",
+      utilizationPct: 26,
+      recentInquiries: 1,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Stable"
+    },
+    debtProfile: {
+      mortgageBalance: 418000,
+      mortgageRate: 0.071,
+      mortgageTermYearsRemaining: 24,
+      propertyValue: 640000,
+      housingPayment: 3240,
+      creditCardBalance: 8600,
+      autoLoanBalance: 23600,
+      studentLoanBalance: 42000,
+      helocBalance: 18000,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Primary Residence",
+      loanPreference: "Either",
+      refinanceHorizonMonths: 84,
+      pmiActive: false,
+      propertyTaxMonthly: 640,
+      homeownerInsuranceMonthly: 190,
+      closingCostSensitivity: "High"
+    },
+    lendingProfile: {
+      underwritingTrack: "Mortgage",
+      employmentStrength: "Strong",
+      collateralStrength: "Strong",
+      businessCashFlowCoverage: null,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "Mortgage relief and college-cash-flow flexibility"
+    },
     taxProfile: {
       filingStatus: "Married filing jointly",
       taxBracketLabel: "High household marginal bracket",
@@ -408,6 +525,180 @@ export const CLIENTS: ClientAccount[] = [
     questionSet: CLIENT_QUESTION_SETS.family
   },
   {
+    id: "first_home_family",
+    name: "The Lopez Family",
+    accountType: "First Home Planning",
+    age: 35,
+    ageLabel: "Adults 35 / 33 | Child 4",
+    householdAges: ["Parent 1: 35", "Parent 2: 33", "Child: 4"],
+    avatar: "👨‍👩‍👦",
+    goal: "First Home Purchase",
+    riskProfile: "Moderate",
+    riskClass: "risk-moderate",
+    description: "Young family renting today and deciding how to structure a first home purchase without crushing reserves.",
+    startingAum: 95000,
+    cash: 95000,
+    holdings: {},
+    shortHoldings: {},
+    marginDebt: 0,
+    marginCall: false,
+    accountSleeves: [
+      { id: "lopez-529", label: "529 Starter", registration: "529 Plan", taxTreatment: "Tax-advantaged education savings", beneficiaryRequired: true },
+      { id: "lopez-retirement", label: "Retirement Savings", registration: "401(k)/IRA mix", taxTreatment: "Tax-deferred and Roth retirement savings", beneficiaryRequired: true },
+      { id: "lopez-house", label: "House Fund", registration: "Joint Taxable", taxTreatment: "Taxable cash and reserve sleeve", beneficiaryRequired: false }
+    ],
+    sleeveCashBalances: {
+      "lopez-529": 12000,
+      "lopez-retirement": 43000,
+      "lopez-house": 40000
+    },
+    holdingAccountMap: {},
+    shortHoldingAccountMap: {},
+    status: "pending",
+    trustScore: 54,
+    mandateScore: 22,
+    advisorNote: "Needs a practical first-home plan that keeps reserves intact instead of stretching for the largest approval.",
+    mandateTargets: ["funds", "fixedIncome", "bonds"],
+    watchouts: ["futures", "forex", "commodities"],
+    insuranceNeeds: ["term-life", "disability", "umbrella"],
+    insuranceCoverage: [],
+    insurancePressure: 0,
+    insuranceGapScore: 46,
+    insuranceNote: "Buying a first home raises the need for income protection and liability coverage, but the family still needs to preserve down-payment liquidity.",
+    cashFlow: {
+      monthlyIncome: 9800,
+      monthlyExpenses: 6100,
+      monthlyDebtPayments: 1150,
+      emergencyReserveMonths: 6,
+      nearTermLiquidityNeed: "High"
+    },
+    creditProfile: {
+      score: 701,
+      scoreBand: "Good",
+      utilizationPct: 24,
+      recentInquiries: 1,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Stable"
+    },
+    debtProfile: {
+      mortgageBalance: 0,
+      mortgageRate: 0,
+      mortgageTermYearsRemaining: 0,
+      propertyValue: 525000,
+      housingPayment: 2150,
+      creditCardBalance: 4800,
+      autoLoanBalance: 16700,
+      studentLoanBalance: 21400,
+      helocBalance: 0,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Primary Residence",
+      loanPreference: "Either",
+      refinanceHorizonMonths: 0,
+      pmiActive: false,
+      propertyTaxMonthly: 540,
+      homeownerInsuranceMonthly: 145,
+      closingCostSensitivity: "High"
+    },
+    lendingProfile: {
+      underwritingTrack: "Mortgage",
+      employmentStrength: "Moderate",
+      collateralStrength: "Moderate",
+      businessCashFlowCoverage: null,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "First-time home purchase with sustainable reserves"
+    },
+    taxProfile: {
+      filingStatus: "Married filing jointly",
+      taxBracketLabel: "Middle-income household bracket",
+      accountTreatment: "Down-payment cash, retirement savings, and young-family debt obligations"
+    },
+    investmentPolicy: {
+      objective: "Prepare for a first home purchase without depleting reserves or derailing long-term savings.",
+      timeHorizon: "Home purchase in the next 12-24 months; retirement and education still ongoing",
+      liquidityNeeds: "High because the down payment, closing cash, and emergency reserves all matter now",
+      constraints: ["Must preserve emergency liquidity after closing", "Cannot treat retirement accounts as free down-payment money"],
+      prohibitedStrategies: ["Using speculative assets as a house fund", "Stretching into a payment that destroys reserves"],
+      prohibitedBuckets: ["futures", "forex", "commodities"],
+      maxSinglePositionPct: 15,
+      equityRangeLabel: "Low-volatility house-fund focus",
+      reviewCadence: "Quarterly home-purchase review",
+      nextReviewFocus: "Test down payment, PMI, and payment durability before choosing a loan lane.",
+      retirementIncomeNeed: "No current retirement withdrawals; focus is accumulation and housing stability"
+    },
+    retirementDistribution: {
+      distributionPhase: false,
+      socialSecurityStrategy: "Not an active planning issue yet.",
+      rmdStatus: "No RMD pressure",
+      withdrawalApproach: "Stay in accumulation mode and avoid raiding retirement accounts for the house purchase unless absolutely necessary.",
+      reserveBucketYears: 1,
+      targetWithdrawalRate: 0
+    },
+    benefitsProfile: {
+      primaryPlan: "401(k) plus family reserve coordination",
+      employerMatch: "Employer match should stay funded before stretching the house budget too far.",
+      hsaStrategy: "HSA use can protect taxable liquidity if the household is eligible.",
+      equityCompensation: "None currently",
+      planningFocus: "Balance a first-home purchase with family protection and retirement continuity."
+    },
+    estateProfile: {
+      coreDocuments: ["Beneficiary review", "Basic will", "Guardian discussion"],
+      trustStructure: "No complex trust structure needed yet, but titling and beneficiary basics matter.",
+      beneficiaryReview: "Retirement and insurance beneficiaries should align with the family plan before purchase.",
+      liquidityRisk: "A big down payment without reserve protection would leave the household exposed.",
+      planningFocus: "The estate lens here is keeping guardianship and beneficiary basics aligned while the family builds net worth."
+    },
+    accountStructure: {
+      registration: "Joint taxable house fund plus retirement savings",
+      taxAdvantagedPriority: "Keep retirement contributions and match discipline intact while building the house fund.",
+      assetLocationNote: "The house fund should stay liquid and low-volatility rather than being forced into aggressive growth assets."
+    },
+    educationPlanning: {
+      active: true,
+      objective: "Keep a modest education start without sacrificing the house purchase.",
+      targetYears: "14 years to first tuition draw",
+      fundingPriority: "Do not overfund education at the cost of home purchase or reserves.",
+      planningNote: "The family needs balance, not competing all-in goals."
+    },
+    revenueProfile: {
+      advisoryFeeBps: 95,
+      serviceTier: "Young family planning",
+      annualRevenueTarget: 902
+    },
+    retirementMath: {
+      annualSpendingGoal: 73200,
+      annualGuaranteedIncome: 0,
+      expectedReturn: 0.059,
+      inflationAssumption: 0.028,
+      assumedLongevityAge: 92,
+      safeWithdrawalGuardrail: 0.04
+    },
+    productComparison: {
+      primaryNeed: "Affordable first-home purchase without sacrificing reserve safety",
+      recommendedLane: "Disciplined down-payment strategy with payment durability and reserve protection",
+      lowerCostAlternative: "Smaller down payment with PMI if that preserves emergency cash and avoids unsafe payment stretch",
+      caution: "A larger house or larger down payment is not automatically the better decision if it leaves the family cash-poor."
+    },
+    crmProfile: {
+      serviceModel: "Quarterly first-home planning review",
+      nextReviewWindow: "Next 21 days",
+      nextTask: "Compare FHA, conventional, and reserve-protection lanes before shopping homes.",
+      lastContactSummary: "Family wants a clear answer on what they can safely afford, not just the biggest number a lender might quote.",
+      referralPotential: "High"
+    },
+    supervisionProfile: {
+      reviewLevel: "Mortgage suitability review",
+      exceptionFocus: "Payment stretch, reserve depletion, and misuse of retirement savings",
+      documentationPriority: "Affordability rationale and reserve-protection notes",
+      supervisionNote: "The first-home recommendation should be defended with affordability and reserve logic, not just approval eligibility."
+    },
+    clientNotes: ["First-home purchase planning should focus on affordability, reserves, and sustainable cash-to-close."],
+    questionSet: CLIENT_QUESTION_SETS.family
+  },
+  {
     id: "entrepreneur",
     name: "Sofia Reyes",
     accountType: "Business Exit Planning",
@@ -454,6 +745,45 @@ export const CLIENTS: ClientAccount[] = [
       monthlyDebtPayments: 2400,
       emergencyReserveMonths: 12,
       nearTermLiquidityNeed: "Moderate"
+    },
+    creditProfile: {
+      score: 768,
+      scoreBand: "Very Good",
+      utilizationPct: 11,
+      recentInquiries: 1,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Stable"
+    },
+    debtProfile: {
+      mortgageBalance: 610000,
+      mortgageRate: 0.064,
+      mortgageTermYearsRemaining: 19,
+      propertyValue: 1040000,
+      housingPayment: 4620,
+      creditCardBalance: 7100,
+      autoLoanBalance: 0,
+      studentLoanBalance: 0,
+      helocBalance: 95000,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Primary Residence",
+      loanPreference: "Fixed",
+      refinanceHorizonMonths: 48,
+      pmiActive: false,
+      propertyTaxMonthly: 980,
+      homeownerInsuranceMonthly: 240,
+      closingCostSensitivity: "Low"
+    },
+    lendingProfile: {
+      underwritingTrack: "Private Wealth",
+      employmentStrength: "Strong",
+      collateralStrength: "Strong",
+      businessCashFlowCoverage: 2.4,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "Liquidity bridge and private-banking flexibility"
     },
     taxProfile: {
       filingStatus: "High-net-worth entrepreneur",
@@ -589,6 +919,45 @@ export const CLIENTS: ClientAccount[] = [
       monthlyDebtPayments: 0,
       emergencyReserveMonths: 24,
       nearTermLiquidityNeed: "Moderate"
+    },
+    creditProfile: {
+      score: 800,
+      scoreBand: "Excellent",
+      utilizationPct: 0,
+      recentInquiries: 0,
+      delinquentAccounts: 0,
+      unpaidCollections: 0,
+      trend: "Stable"
+    },
+    debtProfile: {
+      mortgageBalance: 0,
+      mortgageRate: 0,
+      mortgageTermYearsRemaining: 0,
+      propertyValue: 0,
+      housingPayment: 0,
+      creditCardBalance: 0,
+      autoLoanBalance: 0,
+      studentLoanBalance: 0,
+      helocBalance: 0,
+      unsecuredDebt: 0,
+      unpaidDebtBalance: 0
+    },
+    mortgageProfile: {
+      occupancy: "Not Applicable",
+      loanPreference: "Not Applicable",
+      refinanceHorizonMonths: 0,
+      pmiActive: false,
+      propertyTaxMonthly: 0,
+      homeownerInsuranceMonthly: 0,
+      closingCostSensitivity: "Low"
+    },
+    lendingProfile: {
+      underwritingTrack: "Institutional",
+      employmentStrength: "Strong",
+      collateralStrength: "Strong",
+      businessCashFlowCoverage: 3.1,
+      recentLatePayments: 0,
+      requestedLoanPurpose: "Institutional spending support and reserve continuity"
     },
     taxProfile: {
       filingStatus: "Institutional / tax-exempt",

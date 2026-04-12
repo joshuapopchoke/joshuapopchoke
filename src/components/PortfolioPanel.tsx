@@ -516,6 +516,13 @@ export function PortfolioPanel() {
             </div>
           ) : null}
           <div className="portfolio-summary-card">
+            <span>Credit and debt profile</span>
+            <strong>{activeClient.creditProfile.score} {activeClient.creditProfile.scoreBand} | {formatCurrency(activeClient.debtProfile.creditCardBalance + activeClient.debtProfile.unsecuredDebt)} revolving</strong>
+            <small>
+              {activeClient.debtProfile.mortgageBalance > 0 ? `${formatCurrency(activeClient.debtProfile.mortgageBalance)} mortgage` : "No active mortgage"} | {activeClient.debtProfile.unpaidDebtBalance > 0 ? `${formatCurrency(activeClient.debtProfile.unpaidDebtBalance)} unpaid debt` : "No unpaid debt"}
+            </small>
+          </div>
+          <div className="portfolio-summary-card">
             <span>Tax posture</span>
             <strong>{activeClient.taxProfile.taxBracketLabel}</strong>
             <small>{activeClient.taxProfile.accountTreatment}</small>

@@ -287,6 +287,18 @@ export interface TraineeProfile {
   createdAt: number;
 }
 
+export interface TrainingAssignment {
+  id: string;
+  traineeId: string;
+  moduleId: string;
+  assignedDifficulty: PlayDifficulty | null;
+  jurisdictionCode: string | null;
+  assignedAt: number;
+  dueAt: number | null;
+  status: "pending" | "in-progress" | "completed";
+  completedAt: number | null;
+}
+
 export interface TrainingSessionReport {
   id: string;
   traineeId: string;
@@ -327,6 +339,7 @@ export interface ActiveQuestionState {
 export interface GameStateShape {
   trainees: TraineeProfile[];
   activeTraineeId: string;
+  trainingAssignments: TrainingAssignment[];
   trainingReports: TrainingSessionReport[];
   lastRecordedSessionKey: string | null;
   score: number;

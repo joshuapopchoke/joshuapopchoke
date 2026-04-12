@@ -6,6 +6,7 @@ import { getBehaviorScenario } from "../data/clientBehaviorEvents";
 import { getClientMeetingScenario, getClientReviewMeetingScenario } from "../data/clientMeetings";
 import { getInsuranceDialogue } from "../data/insuranceDialogues";
 import { INSURANCE_PRODUCTS } from "../data/insuranceProducts";
+import { TRAINING_MODULES } from "../data/trainingModules";
 import { buildSupervisionRequest } from "../data/supervisionRequests";
 import { advanceTradingDate, createInitialMarketDate, deriveMarketDateTime, hasAdvancedMarketStep, parseMarketDate } from "../engine/marketClock";
 import { createMarketEngine } from "../engine/marketEngine";
@@ -16,6 +17,7 @@ import { buildRevenueSnapshot } from "../engine/revenueEngine";
 import { buildInterestRateSnapshot, refreshCallableBondTerms } from "../engine/rateEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
 import { buildTaxManagementSnapshot } from "../engine/taxManagementEngine";
+import { updateAssignmentsFromReport } from "../engine/trainingCurriculumEngine";
 import { buildTrainingPerformanceSummary } from "../engine/trainingScoreEngine";
 import { createInsiderInfoEvent, evaluateInsiderDecision } from "../engine/playerComplianceEngine";
 import { applyClientRebalance } from "../engine/rebalancingEngine";
@@ -45,6 +47,7 @@ import type {
   RecommendationDialogueState,
   SaveSlotId,
   SaveSlotSummary,
+  TrainingAssignment,
   TrainingSessionReport,
   SupervisionRequestState,
   TraineeProfile,
@@ -93,20 +96,58 @@ function formatCurrency(value: number) {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-function cloneClients() {
-  return CLIENTS.map((client) => ({
-    ...client,
-    cash: client.startingAum,
-    sleeveCashBalances: { ...client.sleeveCashBalances },
-    holdings: {},
-    shortHoldings: {},
-    marginDebt: 0,
-    marginCall: false,
-    insuranceCoverage: [],
-    insurancePressure: 0,
-    insuranceGapScore: client.insuranceGapScore,
-    status: "pending" as const
-  }));
+function cloneClients(): ClientAccount[] {
+  return CLIENTS.map((client) => {
+    const creditScoreDrift = Math.round((Math.random() - 0.5) * 34);
+    const debtDriftMultiplier = 1 + (Math.random() - 0.5) * 0.16;
+    const unpaidDrift = Math.max(0, Math.round(client.debtProfile.unpaidDebtBalance * (0.75 + Math.random() * 0.6)));
+    const creditScore = clamp(client.creditProfile.score + creditScoreDrift, 580, 835);
+    const scoreBand: ClientAccount["creditProfile"]["scoreBand"] =
+      creditScore >= 780 ? "Excellent" :
+      creditScore >= 740 ? "Very Good" :
+      creditScore >= 670 ? "Good" :
+      creditScore >= 580 ? "Fair" :
+      "Poor";
+
+    return {
+      ...client,
+      cash: client.startingAum,
+      sleeveCashBalances: { ...client.sleeveCashBalances },
+      holdings: {},
+      shortHoldings: {},
+      marginDebt: 0,
+      marginCall: false,
+      insuranceCoverage: [],
+      insurancePressure: 0,
+      insuranceGapScore: client.insuranceGapScore,
+      status: "pending" as const,
+      creditProfile: {
+        ...client.creditProfile,
+        score: creditScore,
+        scoreBand,
+        utilizationPct: clamp(Math.round(client.creditProfile.utilizationPct * (0.8 + Math.random() * 0.45)), 0, 95),
+        recentInquiries: Math.max(0, client.creditProfile.recentInquiries + Math.round((Math.random() - 0.5) * 2)),
+        unpaidCollections: client.creditProfile.unpaidCollections > 0 ? Math.max(0, client.creditProfile.unpaidCollections + Math.round((Math.random() - 0.5) * 2)) : 0,
+        trend: creditScoreDrift > 10 ? "Improving" : creditScoreDrift < -10 ? "Pressured" : "Stable"
+      },
+      debtProfile: {
+        ...client.debtProfile,
+        mortgageBalance: Number((client.debtProfile.mortgageBalance * debtDriftMultiplier).toFixed(0)),
+        propertyValue: Number((client.debtProfile.propertyValue * (0.96 + Math.random() * 0.1)).toFixed(0)),
+        housingPayment: Number((client.debtProfile.housingPayment * (0.94 + Math.random() * 0.12)).toFixed(0)),
+        creditCardBalance: Number((client.debtProfile.creditCardBalance * (0.7 + Math.random() * 0.7)).toFixed(0)),
+        autoLoanBalance: Number((client.debtProfile.autoLoanBalance * (0.82 + Math.random() * 0.24)).toFixed(0)),
+        studentLoanBalance: Number((client.debtProfile.studentLoanBalance * (0.9 + Math.random() * 0.14)).toFixed(0)),
+        helocBalance: Number((client.debtProfile.helocBalance * (0.75 + Math.random() * 0.35)).toFixed(0)),
+        unsecuredDebt: Number((client.debtProfile.unsecuredDebt * (0.7 + Math.random() * 0.7)).toFixed(0)),
+        unpaidDebtBalance: unpaidDrift
+      },
+      lendingProfile: {
+        ...client.lendingProfile,
+        recentLatePayments: client.lendingProfile.recentLatePayments + (unpaidDrift > 0 && Math.random() < 0.45 ? 1 : 0)
+      }
+    };
+  });
 }
 
 function createDefaultPersonalAccountSleeves() {
@@ -122,6 +163,10 @@ function createDefaultTrainees(): TraineeProfile[] {
       createdAt: Date.now()
     }
   ];
+}
+
+function createDefaultTrainingAssignments(): TrainingAssignment[] {
+  return [];
 }
 
 function buildSessionReportKey(cycleNumber: number, difficulty: PlayDifficulty, traineeId: string) {
@@ -1166,6 +1211,22 @@ function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]
       insuranceGapScore: typeof client.insuranceGapScore === "number" ? client.insuranceGapScore : template.insuranceGapScore,
       insuranceNote: client.insuranceNote ?? template.insuranceNote,
       cashFlow: client.cashFlow ?? template.cashFlow,
+      creditProfile: {
+        ...template.creditProfile,
+        ...(client.creditProfile ?? {})
+      },
+      debtProfile: {
+        ...template.debtProfile,
+        ...(client.debtProfile ?? {})
+      },
+      mortgageProfile: {
+        ...template.mortgageProfile,
+        ...(client.mortgageProfile ?? {})
+      },
+      lendingProfile: {
+        ...template.lendingProfile,
+        ...(client.lendingProfile ?? {})
+      },
       taxProfile: client.taxProfile ?? template.taxProfile,
       investmentPolicy: {
         ...template.investmentPolicy,
@@ -1352,10 +1413,12 @@ function buildFreshDifficultyState(
   const personalAccountSleeves = createDefaultPersonalAccountSleeves();
   const personalSleeveCashBalances = createDefaultPersonalSleeveCashBalances();
   const trainees = createDefaultTrainees();
+  const trainingAssignments = createDefaultTrainingAssignments();
 
   return {
     trainees,
     activeTraineeId: trainees[0].id,
+    trainingAssignments,
     trainingReports: [],
     lastRecordedSessionKey: null,
     score: baseScores[difficulty],
@@ -1443,6 +1506,8 @@ type GameState = GameStateShape & {
   upsertTrainee: (trainee: TraineeProfile) => void;
   removeTrainee: (traineeId: string) => void;
   setActiveTrainee: (traineeId: string) => void;
+  assignTrainingModule: (traineeId: string, moduleId: string, assignedDifficulty: PlayDifficulty, dueAt?: number | null, jurisdictionCode?: string | null) => void;
+  removeTrainingModule: (assignmentId: string) => void;
   recordTrainingReport: () => void;
   setTab: (tab: AppTab) => void;
   selectTicker: (symbol: string) => void;
@@ -1494,6 +1559,7 @@ type PersistedGameSnapshot = Pick<
   GameState,
   | "trainees"
   | "activeTraineeId"
+  | "trainingAssignments"
   | "trainingReports"
   | "lastRecordedSessionKey"
   | "score"
@@ -1721,6 +1787,7 @@ function buildSnapshot(state: GameState): PersistedGameSnapshot {
   return {
     trainees: state.trainees,
     activeTraineeId: state.activeTraineeId,
+    trainingAssignments: state.trainingAssignments,
     trainingReports: state.trainingReports,
     lastRecordedSessionKey: state.lastRecordedSessionKey,
     score: state.score,
@@ -2158,6 +2225,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       commit({
         trainees: fallbackTrainees,
         activeTraineeId: state.activeTraineeId === traineeId ? fallbackTrainees[0].id : state.activeTraineeId,
+        trainingAssignments: state.trainingAssignments.filter((assignment) => assignment.traineeId !== traineeId),
         trainingReports: state.trainingReports.filter((report) => report.traineeId !== traineeId)
       });
     },
@@ -2168,6 +2236,53 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
 
       commit({ activeTraineeId: traineeId }, { touchSave: false });
     },
+    assignTrainingModule: (traineeId, moduleId, assignedDifficulty, dueAt = null, jurisdictionCode = null) => {
+      const state = get();
+      if (!state.trainees.some((entry) => entry.id === traineeId)) {
+        return;
+      }
+
+      if (!TRAINING_MODULES.some((module) => module.id === moduleId)) {
+        return;
+      }
+
+      const existingAssignment = state.trainingAssignments.find((assignment) => assignment.traineeId === traineeId && assignment.moduleId === moduleId && assignment.status !== "completed");
+      if (existingAssignment) {
+        commit({
+          trainingAssignments: state.trainingAssignments.map((assignment) => assignment.id === existingAssignment.id ? {
+            ...assignment,
+            assignedDifficulty,
+            jurisdictionCode,
+            dueAt,
+            status: "pending",
+            completedAt: null
+          } : assignment)
+        });
+        return;
+      }
+
+      const nextAssignment: TrainingAssignment = {
+        id: `assignment-${Date.now()}`,
+        traineeId,
+        moduleId,
+        assignedDifficulty,
+        jurisdictionCode,
+        assignedAt: Date.now(),
+        dueAt,
+        status: "pending",
+        completedAt: null
+      };
+
+      commit({
+        trainingAssignments: [nextAssignment, ...state.trainingAssignments]
+      });
+    },
+    removeTrainingModule: (assignmentId) => {
+      const state = get();
+      commit({
+        trainingAssignments: state.trainingAssignments.filter((assignment) => assignment.id !== assignmentId)
+      });
+    },
     recordTrainingReport: () => {
       const state = get();
       const nextSessionKey = buildSessionReportKey(state.cycleNumber, state.activeDifficulty, state.activeTraineeId);
@@ -2177,6 +2292,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
 
       const report = buildTrainingSessionReport(state);
       commit({
+        trainingAssignments: updateAssignmentsFromReport(state.trainingAssignments, report),
         trainingReports: [report, ...state.trainingReports].slice(0, 60),
         lastRecordedSessionKey: nextSessionKey
       });
@@ -3876,6 +3992,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.workflowCooldownUntilCycle = Math.max(1, state.workflowCooldownUntilCycle ?? 1);
     state.trainees = Array.isArray(state.trainees) && state.trainees.length > 0 ? state.trainees : createDefaultTrainees();
     state.activeTraineeId = state.trainees.some((entry) => entry.id === state.activeTraineeId) ? state.activeTraineeId : state.trainees[0].id;
+    state.trainingAssignments = Array.isArray(state.trainingAssignments) ? state.trainingAssignments : createDefaultTrainingAssignments();
     state.trainingReports = Array.isArray(state.trainingReports) ? state.trainingReports : [];
     state.lastRecordedSessionKey = state.lastRecordedSessionKey ?? null;
     state.difficultySessions = state.difficultySessions ?? {};
@@ -3899,6 +4016,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
   partialize: (state) => ({
     trainees: state.trainees,
     activeTraineeId: state.activeTraineeId,
+    trainingAssignments: state.trainingAssignments,
     trainingReports: state.trainingReports,
     lastRecordedSessionKey: state.lastRecordedSessionKey,
     score: state.score,

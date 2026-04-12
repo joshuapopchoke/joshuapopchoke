@@ -30,10 +30,25 @@ export interface RothConversionCalculatorSnapshot {
 }
 
 export interface MortgageRefiCalculatorSnapshot {
+  principal: number;
   currentRate: number;
   proposedRate: number;
+  currentPayment: number;
+  proposedPayment: number;
+  closingCosts: number;
   monthlySavings: number;
   breakEvenMonths: number;
+  recommendation: string;
+}
+
+export interface MortgagePurchaseCalculatorSnapshot {
+  purchasePrice: number;
+  downPaymentAmount: number;
+  loanAmount: number;
+  monthlyPrincipalAndInterest: number;
+  totalHousingPayment: number;
+  estimatedCashToClose: number;
+  pmiRequired: boolean;
   recommendation: string;
 }
 
@@ -99,13 +114,18 @@ export function buildRothConversionCalculator(client: ClientAccount, accountValu
 }
 
 export function buildMortgageRefiCalculator(client: ClientAccount): MortgageRefiCalculatorSnapshot {
-  const principal = clamp(client.cashFlow.monthlyExpenses * 48, 180000, 650000);
-  const currentRate = client.riskProfile === "Conservative" ? 0.068 : 0.071;
-  const proposedRate = currentRate - 0.0075;
-  const currentPayment = monthlyPayment(principal, currentRate, 30);
-  const proposedPayment = monthlyPayment(principal, proposedRate, 30);
+  const principal = clamp(
+    client.debtProfile.mortgageBalance > 0 ? client.debtProfile.mortgageBalance : client.cashFlow.monthlyExpenses * 48,
+    120000,
+    950000
+  );
+  const currentRate = client.debtProfile.mortgageRate > 0 ? client.debtProfile.mortgageRate : client.riskProfile === "Conservative" ? 0.068 : 0.071;
+  const proposedRate = Math.max(0.04, currentRate - (client.creditProfile.score >= 740 ? 0.0085 : 0.0055));
+  const termYears = Math.max(10, client.debtProfile.mortgageTermYearsRemaining || 30);
+  const currentPayment = monthlyPayment(principal, currentRate, termYears);
+  const proposedPayment = monthlyPayment(principal, proposedRate, termYears);
   const monthlySavings = Math.max(0, Math.round(currentPayment - proposedPayment));
-  const closingCosts = Math.round(principal * 0.018);
+  const closingCosts = Math.round(principal * (client.mortgageProfile.closingCostSensitivity === "High" ? 0.024 : client.mortgageProfile.closingCostSensitivity === "Moderate" ? 0.02 : 0.016));
   const breakEvenMonths = monthlySavings > 0 ? Math.round(closingCosts / monthlySavings) : 999;
   const recommendation =
     monthlySavings > 0
@@ -113,10 +133,48 @@ export function buildMortgageRefiCalculator(client: ClientAccount): MortgageRefi
       : "Current market terms do not create a clear refinance advantage right now.";
 
   return {
+    principal,
     currentRate,
     proposedRate,
+    currentPayment: Math.round(currentPayment),
+    proposedPayment: Math.round(proposedPayment),
+    closingCosts,
     monthlySavings,
     breakEvenMonths,
+    recommendation
+  };
+}
+
+export function buildMortgagePurchaseCalculator(
+  purchasePrice: number,
+  downPaymentPct: number,
+  rate: number,
+  years: number,
+  propertyTaxMonthly: number,
+  homeownerInsuranceMonthly: number
+): MortgagePurchaseCalculatorSnapshot {
+  const normalizedPurchasePrice = clamp(purchasePrice, 120000, 1500000);
+  const normalizedDownPaymentPct = clamp(downPaymentPct, 0.03, 0.5);
+  const downPaymentAmount = Math.round(normalizedPurchasePrice * normalizedDownPaymentPct);
+  const loanAmount = Math.max(0, normalizedPurchasePrice - downPaymentAmount);
+  const monthlyPrincipalAndInterest = Math.round(monthlyPayment(loanAmount, clamp(rate, 0.03, 0.12), Math.max(10, years)));
+  const pmiRequired = normalizedDownPaymentPct < 0.2;
+  const monthlyPmiEstimate = pmiRequired ? Math.round((loanAmount * 0.007) / 12) : 0;
+  const totalHousingPayment = monthlyPrincipalAndInterest + propertyTaxMonthly + homeownerInsuranceMonthly + monthlyPmiEstimate;
+  const estimatedCashToClose = Math.round(downPaymentAmount + normalizedPurchasePrice * 0.03);
+  const recommendation =
+    pmiRequired
+      ? "This purchase lane is workable, but the trainee should explain PMI, reserve needs, and when the borrower might exit mortgage insurance."
+      : "This purchase lane has stronger equity support, so the trainee can focus more on payment durability and cash-to-close discipline.";
+
+  return {
+    purchasePrice: normalizedPurchasePrice,
+    downPaymentAmount,
+    loanAmount,
+    monthlyPrincipalAndInterest,
+    totalHousingPayment,
+    estimatedCashToClose,
+    pmiRequired,
     recommendation
   };
 }

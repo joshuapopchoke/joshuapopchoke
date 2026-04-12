@@ -2,12 +2,14 @@ import { useState } from "react";
 
 interface LoginScreenProps {
   error: string | null;
-  onLogin: (username: string, password: string) => void;
+  onLogin: (username: string, password: string) => void | Promise<void>;
+  loading?: boolean;
 }
 
-export function LoginScreen({ error, onLogin }: LoginScreenProps) {
+export function LoginScreen({ error, onLogin, loading = false }: LoginScreenProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   return (
     <main className="auth-shell">
@@ -33,9 +35,14 @@ export function LoginScreen({ error, onLogin }: LoginScreenProps) {
 
         <form
           className="auth-form"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            onLogin(username, password);
+            setSubmitting(true);
+            try {
+              await onLogin(username, password);
+            } finally {
+              setSubmitting(false);
+            }
           }}
         >
           <label>
@@ -47,8 +54,8 @@ export function LoginScreen({ error, onLogin }: LoginScreenProps) {
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter password" />
           </label>
           {error ? <div className="auth-error">{error}</div> : null}
-          <button type="submit" className="primary-btn auth-submit">
-            Sign In
+          <button type="submit" className="primary-btn auth-submit" disabled={loading || submitting}>
+            {loading ? "Loading..." : submitting ? "Signing In..." : "Sign In"}
           </button>
         </form>
       </section>

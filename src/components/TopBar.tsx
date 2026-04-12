@@ -68,6 +68,12 @@ interface TopBarProps {
   brandTitle?: string;
   showTrainingManager?: boolean;
   showPlannerTools?: boolean;
+  showDifficultyControls?: boolean;
+  showNewSessionButton?: boolean;
+  showDifficultyRibbon?: boolean;
+  showSessionManager?: boolean;
+  showReloadBank?: boolean;
+  visibleRibbonItems?: Array<"score" | "rates" | "revenue" | "personal" | "book" | "total" | "client" | "timer" | "sec" | "difficulty" | "study" | "trainee" | "coach" | "calendar">;
   extraControls?: ReactNode;
 }
 
@@ -75,6 +81,12 @@ export function TopBar({
   brandTitle = "Fiduciary Duty",
   showTrainingManager = false,
   showPlannerTools = true,
+  showDifficultyControls = true,
+  showNewSessionButton = true,
+  showDifficultyRibbon = true,
+  showSessionManager = true,
+  showReloadBank = true,
+  visibleRibbonItems,
   extraControls = null
 }: TopBarProps) {
   const score = useGameStore((state) => state.score);
@@ -178,7 +190,7 @@ export function TopBar({
           <span>{questionBankStatus === "loading" ? "Bank loading" : "Bank ready"}</span>
         </div>
         <div className="control-strip">
-          {(["learner", "trainee", "associate", "advisor", "senior"] as const).map((difficulty) => (
+          {showDifficultyControls ? (["learner", "trainee", "associate", "advisor", "senior"] as const).map((difficulty) => (
             <button
               key={difficulty}
               type="button"
@@ -187,101 +199,109 @@ export function TopBar({
             >
               {DIFFICULTY_LABELS[difficulty]}
             </button>
-          ))}
-          <button type="button" className="control-btn" onClick={() => resetSession()}>
-            New Session
-          </button>
+          )) : null}
+          {showNewSessionButton ? (
+            <button type="button" className="control-btn" onClick={() => resetSession()}>
+              New Session
+            </button>
+          ) : null}
           <button type="button" className={isPaused ? "control-btn active" : "control-btn"} onClick={() => togglePause()}>
             {isPaused ? "Resume" : "Pause"}
           </button>
-          <Suspense fallback={<button className="control-btn" disabled>Sessions</button>}>
-            <SessionManagerOverlay />
-          </Suspense>
+          {showSessionManager ? (
+            <Suspense fallback={<button className="control-btn" disabled>Sessions</button>}>
+              <SessionManagerOverlay />
+            </Suspense>
+          ) : null}
           {showTrainingManager ? null : null}
-          <button type="button" className="control-btn" onClick={() => void initializeQuestionBank(activeDifficulty)}>
-            Reload Bank
-          </button>
+          {showReloadBank ? (
+            <button type="button" className="control-btn" onClick={() => void initializeQuestionBank(activeDifficulty)}>
+              Reload Bank
+            </button>
+          ) : null}
           {extraControls}
         </div>
       </div>
       <div className="topbar-ribbon">
-        <div className="ribbon-item ribbon-item--score">
+        {!visibleRibbonItems || visibleRibbonItems.includes("score") ? <div className="ribbon-item ribbon-item--score">
           <span>Score</span>
           <strong>{score.toLocaleString()}</strong>
-        </div>
-        <div className="ribbon-item ribbon-item--rates">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("rates") ? <div className="ribbon-item ribbon-item--rates">
           <span>Rates</span>
           <strong>Fed {formatRate(interestRates.fedFunds)} | 10Y {formatRate(interestRates.tenYearTreasury)}</strong>
           <small className={interestRates.periodChangeBps <= 0 ? "up" : "down"}>
             {interestRates.label} | 2Y {formatRate(interestRates.twoYearTreasury)} | Mtg {formatRate(interestRates.mortgage30Year)} | {interestRates.periodChangeBps >= 0 ? "+" : ""}{interestRates.periodChangeBps} bps
           </small>
-        </div>
-        <div className="ribbon-item ribbon-item--revenue">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("revenue") ? <div className="ribbon-item ribbon-item--revenue">
           <span>Revenue</span>
           <strong>{formatCurrency(revenueSnapshot.annualizedGrossRevenue)}/yr</strong>
           <small className="up">{formatCurrency(revenueSnapshot.cycleRevenue)} this cycle | {revenueSnapshot.retainedClients} retained</small>
-        </div>
-        <div className="ribbon-item ribbon-item--personal">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("personal") ? <div className="ribbon-item ribbon-item--personal">
           <span>Personal USD</span>
           <strong>{formatCurrency(personalEquity)}</strong>
           <small className={personalMarginCall ? "down" : personalDeltaClass}>
             {personalMarginCall ? `Call | ${formatCurrency(personalMarginDebt)} debt` : `${formatDeltaDollars(personalDelta)} | ${formatDeltaPercent(personalDeltaPercent)}`}
           </small>
-        </div>
-        <div className="ribbon-item ribbon-item--book">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("book") ? <div className="ribbon-item ribbon-item--book">
           <span>Book</span>
           <strong>{clients.length} Clients</strong>
           <small className={totalDeltaClass}>{formatDeltaDollars(totalDelta)} | {formatDeltaPercent(totalDeltaPercent)}</small>
-        </div>
-        <div className="ribbon-item ribbon-item--total">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("total") ? <div className="ribbon-item ribbon-item--total">
           <span>Total USD</span>
           <strong>{formatCurrency(totalAum)}</strong>
           <small className={totalDeltaClass}>{formatDeltaDollars(totalDelta)} | {formatDeltaPercent(totalDeltaPercent)}</small>
-        </div>
-        <div className="ribbon-item ribbon-item--client">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("client") ? <div className="ribbon-item ribbon-item--client">
           <span>Client USD</span>
           <strong>{formatCurrency(clientUsd)}</strong>
           <small className={clientDeltaClass}>{activeClient?.name ?? "No client"} | {formatDeltaPercent(clientDeltaPercent)}</small>
-        </div>
-        <div className="ribbon-item ribbon-item--timer">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("timer") ? <div className="ribbon-item ribbon-item--timer">
           <span>Timer</span>
           <strong>{minutes}:{seconds.toString().padStart(2, "0")}</strong>
           <small>{isPaused ? "Paused" : "Cycle live"}</small>
-        </div>
-        <div className="ribbon-item ribbon-item--sec">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("sec") ? <div className="ribbon-item ribbon-item--sec">
           <span>SEC</span>
           <strong>{secMeterLevel}%</strong>
           <div className="meter-track compact">
             <div className="meter-fill" style={{ width: `${secMeterLevel}%` }} />
           </div>
-        </div>
-        <div className="ribbon-item ribbon-item--difficulty">
-          <span>Difficulty</span>
-          <strong>{DIFFICULTY_LABELS[activeDifficulty]}</strong>
-          <small>{difficultyExamKeys.map(bankLabel).join(" | ") || "No bank cached"}</small>
-        </div>
-        <div className="ribbon-item ribbon-item--study">
+        </div> : null}
+        {showDifficultyRibbon && (!visibleRibbonItems || visibleRibbonItems.includes("difficulty")) ? (
+          <div className="ribbon-item ribbon-item--difficulty">
+            <span>Difficulty</span>
+            <strong>{DIFFICULTY_LABELS[activeDifficulty]}</strong>
+            <small>{difficultyExamKeys.map(bankLabel).join(" | ") || "No bank cached"}</small>
+          </div>
+        ) : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("study") ? <div className="ribbon-item ribbon-item--study">
           <span>Study</span>
           <strong>{answeredQuestions} answered</strong>
           <small className={accuracy >= 70 ? "up" : accuracy >= 50 ? "" : "down"}>
             {correctAnswers} correct | {accuracy.toFixed(0)}% | {strongestExam?.count ? strongestExam.exam : "Build streak"}
           </small>
-        </div>
-        <div className="ribbon-item ribbon-item--trainee">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("trainee") ? <div className="ribbon-item ribbon-item--trainee">
           <span>Trainee</span>
           <strong>{trainees.find((entry) => entry.id === activeTraineeId)?.name ?? "Primary Trainee"}</strong>
           <small>{trainees.length} profiles loaded</small>
-        </div>
-        <div className="ribbon-item ribbon-item--coach">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("coach") ? <div className="ribbon-item ribbon-item--coach">
           <span>Why It Matters</span>
           <strong>Correct answers build exam confidence and grow your personal portfolio.</strong>
           <small>Each right answer reinforces real SIE / Series concepts and adds USD to your self-directed account.</small>
-        </div>
-        <div className="ribbon-item ribbon-item--calendar">
+        </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("calendar") ? <div className="ribbon-item ribbon-item--calendar">
           <span>Game Clock</span>
           <strong>{gameDateLabel}</strong>
           <small>{gameSessionLabel}</small>
-        </div>
+        </div> : null}
         {showPlannerTools ? <PlannerToolsRibbonCard /> : null}
       </div>
     </header>

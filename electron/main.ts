@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import path from "node:path";
 import { autoUpdater } from "electron-updater";
 
@@ -11,28 +11,61 @@ function configureAutoUpdates() {
 
   const feedUrl = process.env.AUTO_UPDATE_URL;
   if (feedUrl) {
-    autoUpdater.setFeedURL({ provider: "generic", url: feedUrl });
+    try {
+      const parsedFeedUrl = new URL(feedUrl);
+      if (parsedFeedUrl.protocol === "https:") {
+        autoUpdater.setFeedURL({ provider: "generic", url: parsedFeedUrl.toString() });
+      }
+    } catch {
+      return;
+    }
   }
 
   void autoUpdater.checkForUpdatesAndNotify();
 }
 
 function createWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workAreaSize;
+  const targetWidth = Math.max(1100, Math.min(1600, Math.floor(workArea.width * 0.94)));
+  const targetHeight = Math.max(760, Math.min(1000, Math.floor(workArea.height * 0.94)));
+
   const win = new BrowserWindow({
-    width: 1600,
-    height: 1000,
-    minWidth: 1280,
-    minHeight: 800,
+    width: targetWidth,
+    height: targetHeight,
+    minWidth: Math.min(1100, workArea.width),
+    minHeight: Math.min(760, workArea.height),
     backgroundColor: "#07111f",
     title: "FIDUCIARY DUTY",
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      devTools: isDev
     }
+  });
+
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => {
+    event.preventDefault();
+  });
+  win.webContents.on("will-attach-webview", (event) => {
+    event.preventDefault();
+  });
+  win.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
+  win.once("ready-to-show", () => {
+    if (workArea.width <= 1440 || workArea.height <= 900) {
+      win.maximize();
+    }
+    win.show();
   });
 
   if (isDev) {

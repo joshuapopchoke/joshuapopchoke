@@ -32,6 +32,49 @@ export interface ClientCashFlowProfile {
   nearTermLiquidityNeed: "Low" | "Moderate" | "High";
 }
 
+export interface CreditProfile {
+  score: number;
+  scoreBand: "Poor" | "Fair" | "Good" | "Very Good" | "Excellent";
+  utilizationPct: number;
+  recentInquiries: number;
+  delinquentAccounts: number;
+  unpaidCollections: number;
+  trend: "Improving" | "Stable" | "Pressured";
+}
+
+export interface DebtProfile {
+  mortgageBalance: number;
+  mortgageRate: number;
+  mortgageTermYearsRemaining: number;
+  propertyValue: number;
+  housingPayment: number;
+  creditCardBalance: number;
+  autoLoanBalance: number;
+  studentLoanBalance: number;
+  helocBalance: number;
+  unsecuredDebt: number;
+  unpaidDebtBalance: number;
+}
+
+export interface MortgagePlanningProfile {
+  occupancy: "Primary Residence" | "Second Home" | "Investment Property" | "Not Applicable";
+  loanPreference: "Fixed" | "ARM" | "Either" | "Not Applicable";
+  refinanceHorizonMonths: number;
+  pmiActive: boolean;
+  propertyTaxMonthly: number;
+  homeownerInsuranceMonthly: number;
+  closingCostSensitivity: "Low" | "Moderate" | "High";
+}
+
+export interface LendingProfile {
+  underwritingTrack: "Consumer" | "Mortgage" | "Private Wealth" | "Institutional";
+  employmentStrength: "Weak" | "Moderate" | "Strong";
+  collateralStrength: "Weak" | "Moderate" | "Strong";
+  businessCashFlowCoverage: number | null;
+  recentLatePayments: number;
+  requestedLoanPurpose: string;
+}
+
 export interface ClientTaxProfile {
   filingStatus: string;
   taxBracketLabel: string;
@@ -163,6 +206,10 @@ export interface ClientAccount {
   insuranceGapScore: number;
   insuranceNote: string;
   cashFlow: ClientCashFlowProfile;
+  creditProfile: CreditProfile;
+  debtProfile: DebtProfile;
+  mortgageProfile: MortgagePlanningProfile;
+  lendingProfile: LendingProfile;
   taxProfile: ClientTaxProfile;
   investmentPolicy: InvestmentPolicyProfile;
   retirementDistribution: RetirementDistributionProfile;
