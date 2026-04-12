@@ -11,6 +11,13 @@ export interface MortgageTrainingScenario {
   coachingSteps: string[];
 }
 
+export const MORTGAGE_TRAINING_SCENARIO_IDS = [
+  "first-time-buyer",
+  "investor-property",
+  "fha-vs-conventional",
+  "rate-lock"
+] as const;
+
 function currency(value: number) {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -25,12 +32,18 @@ export function buildMortgageTrainingScenarios(client: ClientAccount, stateProfi
     : 0;
   const reserveMonths = client.cash / Math.max(1, client.cashFlow.monthlyExpenses + client.cashFlow.monthlyDebtPayments);
   const stateName = stateProfile?.name ?? "the assigned state";
+  const purchaseLocation = client.mortgagePurchaseProfile
+    ? `${client.mortgagePurchaseProfile.city}, ${client.mortgagePurchaseProfile.stateCode}`
+    : stateName;
+  const targetPriceNote = client.mortgagePurchaseProfile
+    ? ` Target home target is about ${currency(client.mortgagePurchaseProfile.targetPurchasePrice)} for a ${client.mortgagePurchaseProfile.propertyType.toLowerCase()}.`
+    : "";
 
   return [
     {
       id: "first-time-buyer",
       title: "First-Time Buyer Readiness",
-      summary: `Use this lane to train whether ${client.name.split(" ")[0]} is truly purchase-ready in ${stateName}, not just able to scrape into an approval.`,
+      summary: `Use this lane to train whether ${client.name.split(" ")[0]} is truly purchase-ready in ${purchaseLocation}, not just able to scrape into an approval.${targetPriceNote}`,
       recommendedLane:
         client.creditProfile.score >= 700 && reserveMonths >= 4 && backEndDti < 0.42
           ? "Move forward with a structured first-time-buyer conversation."

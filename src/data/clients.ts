@@ -603,6 +603,22 @@ export const CLIENTS: ClientAccount[] = [
       homeownerInsuranceMonthly: 145,
       closingCostSensitivity: "High"
     },
+    mortgagePurchaseProfile: {
+      stage: "First-time purchase",
+      stateCode: "CA",
+      metroArea: "Los Angeles-Long Beach-Anaheim",
+      city: "Los Angeles",
+      county: "Los Angeles County",
+      propertyType: "Starter condo or townhome",
+      targetPurchasePrice: 980000,
+      maxComfortPurchasePrice: 760000,
+      availableCashToClose: 70000,
+      targetDownPaymentPct: 0.08,
+      hoaMonthly: 375,
+      localMarketPressure: "Very High",
+      localRateAdjustmentBps: 12,
+      localHousingNote: "This family wants to buy in Los Angeles, where even entry-level ownership can carry high taxes, HOA dues, insurance, and larger cash-to-close pressure than the state average suggests."
+    },
     lendingProfile: {
       underwritingTrack: "Mortgage",
       employmentStrength: "Moderate",

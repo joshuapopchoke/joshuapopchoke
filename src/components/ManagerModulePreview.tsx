@@ -13,6 +13,17 @@ interface ManagerModulePreviewProps {
   onExit: () => void;
 }
 
+function formatScenarioTitle(value: string | null) {
+  if (!value) {
+    return "Locked mortgage scenario";
+  }
+
+  return value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function ManagerModulePreview({ moduleId, assignedDifficulty, jurisdictionCode, onExit }: ManagerModulePreviewProps) {
   const setDifficulty = useGameStore((state) => state.setDifficulty);
   const module = useMemo(
@@ -32,10 +43,19 @@ export function ManagerModulePreview({ moduleId, assignedDifficulty, jurisdictio
 
   const focusedRibbonItems =
     module.workspace === "mortgage-debt-planning" || module.workspace === "bank-lending"
-      ? ["score", "timer", "calendar"] as const
+      ? module.workspace === "mortgage-debt-planning"
+        ? ["score", "assignment", "timer", "calendar"] as const
+        : ["score", "timer", "calendar"] as const
       : module.workspace === "exam-foundations"
         ? ["score", "timer", "study"] as const
         : undefined;
+
+  const previewMortgageRate = module.workspace === "mortgage-debt-planning"
+    ? Number((0.055 + Math.random() * 0.03).toFixed(4))
+    : null;
+  const previewScenarioId = module.workspace === "mortgage-debt-planning"
+    ? "fha-vs-conventional"
+    : null;
 
   const assignment: AssignmentProgressSnapshot = {
     assignmentId: `manager-preview-${module.id}`,
@@ -45,6 +65,8 @@ export function ManagerModulePreview({ moduleId, assignedDifficulty, jurisdictio
     },
     assignedDifficulty,
     jurisdictionCode,
+    assignedMortgageRate: previewMortgageRate,
+    assignedMortgageScenarioId: previewScenarioId,
     status: "in-progress",
     completionPercent: 0,
     bestMatchingReport: null,
@@ -63,6 +85,11 @@ export function ManagerModulePreview({ moduleId, assignedDifficulty, jurisdictio
         showSessionManager={module.workspace === "full-access"}
         showReloadBank={module.workspace === "full-access"}
         visibleRibbonItems={module.workspace === "full-access" ? undefined : (focusedRibbonItems ? [...focusedRibbonItems] : undefined)}
+        assignmentRibbonCard={module.workspace === "mortgage-debt-planning" && previewMortgageRate !== null ? {
+          label: "Assigned File",
+          title: `${(previewMortgageRate * 100).toFixed(2)}% mortgage`,
+          detail: formatScenarioTitle(previewScenarioId)
+        } : null}
         extraControls={(
           <button type="button" className="control-btn" onClick={onExit}>
             Back to Manager

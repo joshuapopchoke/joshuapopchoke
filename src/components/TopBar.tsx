@@ -73,7 +73,12 @@ interface TopBarProps {
   showDifficultyRibbon?: boolean;
   showSessionManager?: boolean;
   showReloadBank?: boolean;
-  visibleRibbonItems?: Array<"score" | "rates" | "revenue" | "personal" | "book" | "total" | "client" | "timer" | "sec" | "difficulty" | "study" | "trainee" | "coach" | "calendar">;
+  visibleRibbonItems?: Array<"score" | "rates" | "revenue" | "personal" | "book" | "total" | "client" | "timer" | "sec" | "difficulty" | "study" | "trainee" | "coach" | "calendar" | "assignment">;
+  assignmentRibbonCard?: {
+    label: string;
+    title: string;
+    detail: string;
+  } | null;
   extraControls?: ReactNode;
 }
 
@@ -87,6 +92,7 @@ export function TopBar({
   showSessionManager = true,
   showReloadBank = true,
   visibleRibbonItems,
+  assignmentRibbonCard = null,
   extraControls = null
 }: TopBarProps) {
   const score = useGameStore((state) => state.score);
@@ -302,6 +308,13 @@ export function TopBar({
           <strong>{gameDateLabel}</strong>
           <small>{gameSessionLabel}</small>
         </div> : null}
+        {!visibleRibbonItems || visibleRibbonItems.includes("assignment") ? assignmentRibbonCard ? (
+          <div className="ribbon-item ribbon-item--assignment">
+            <span>{assignmentRibbonCard.label}</span>
+            <strong>{assignmentRibbonCard.title}</strong>
+            <small>{assignmentRibbonCard.detail}</small>
+          </div>
+        ) : null : null}
         {showPlannerTools ? <PlannerToolsRibbonCard /> : null}
       </div>
     </header>

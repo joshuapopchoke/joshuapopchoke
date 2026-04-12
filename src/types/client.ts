@@ -66,6 +66,23 @@ export interface MortgagePlanningProfile {
   closingCostSensitivity: "Low" | "Moderate" | "High";
 }
 
+export interface MortgagePurchaseProfile {
+  stage: "First-time purchase" | "Move-up purchase" | "Investment acquisition";
+  stateCode: string;
+  metroArea: string;
+  city: string;
+  county: string;
+  propertyType: string;
+  targetPurchasePrice: number;
+  maxComfortPurchasePrice: number;
+  availableCashToClose: number;
+  targetDownPaymentPct: number;
+  hoaMonthly: number;
+  localMarketPressure: "Low" | "Moderate" | "High" | "Very High";
+  localRateAdjustmentBps: number;
+  localHousingNote: string;
+}
+
 export interface LendingProfile {
   underwritingTrack: "Consumer" | "Mortgage" | "Private Wealth" | "Institutional";
   employmentStrength: "Weak" | "Moderate" | "Strong";
@@ -209,6 +226,7 @@ export interface ClientAccount {
   creditProfile: CreditProfile;
   debtProfile: DebtProfile;
   mortgageProfile: MortgagePlanningProfile;
+  mortgagePurchaseProfile?: MortgagePurchaseProfile | null;
   lendingProfile: LendingProfile;
   taxProfile: ClientTaxProfile;
   investmentPolicy: InvestmentPolicyProfile;

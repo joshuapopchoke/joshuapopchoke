@@ -32,6 +32,31 @@ interface EmployeeAppViewProps {
   onLogout: () => void;
 }
 
+function formatAssignmentScenarioTitle(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function mortgageScenarioClientId(scenarioId: string | null) {
+  switch (scenarioId) {
+    case "first-time-buyer":
+    case "fha-vs-conventional":
+      return "first_home_family";
+    case "investor-property":
+      return "entrepreneur";
+    case "rate-lock":
+      return "young_pro";
+    default:
+      return null;
+  }
+}
+
 export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
   const activeDifficulty = useGameStore((state) => state.activeDifficulty);
   const activeTraineeId = useGameStore((state) => state.activeTraineeId);
@@ -58,6 +83,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [launchedAssignmentId, setLaunchedAssignmentId] = useState<string | null>(null);
   const [completedAssignmentId, setCompletedAssignmentId] = useState<string | null>(null);
+  const [autoBoundMortgageAssignmentId, setAutoBoundMortgageAssignmentId] = useState<string | null>(null);
   const [workspaceTelemetry, setWorkspaceTelemetry] = useState<{
     score: number;
     scoreCards: { label: string; score: number }[];
@@ -155,6 +181,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
     if (launchedAssignmentId && !activeAssignments.some((entry) => entry.assignmentId === launchedAssignmentId)) {
       setLaunchedAssignmentId(null);
       setLaunchBaseline(null);
+      setAutoBoundMortgageAssignmentId(null);
     }
   }, [activeAssignments, launchedAssignmentId]);
 
@@ -177,6 +204,19 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
       launchedAssignment.module.workspace === "bank-lending" ||
       launchedAssignment.module.workspace === "client-meeting-readiness";
 
+    if (launchedAssignment.module.workspace === "mortgage-debt-planning" && autoBoundMortgageAssignmentId !== launchedAssignment.assignmentId) {
+      const mappedClientId = mortgageScenarioClientId(launchedAssignment.assignedMortgageScenarioId);
+      const mappedClientExists = mappedClientId ? clients.some((client) => client.id === mappedClientId) : false;
+      if (mappedClientId && mappedClientExists && activeClientId !== mappedClientId) {
+        setAutoBoundMortgageAssignmentId(launchedAssignment.assignmentId);
+        void selectClient(mappedClientId);
+        return;
+      }
+      if (mappedClientId && mappedClientExists) {
+        setAutoBoundMortgageAssignmentId(launchedAssignment.assignmentId);
+      }
+    }
+
     if (requiresClientContext && clients[0] && (!activeClientId || activeClientId === "player")) {
       void selectClient(clients[0].id);
     }
@@ -184,7 +224,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
     if (launchedAssignment.module.workspace === "exam-foundations" && !activeQuestion.question && clients[0]) {
       void selectClient(clients[0].id);
     }
-  }, [activeClientId, activeQuestion.question, clients, launchedAssignment, selectClient]);
+  }, [activeClientId, activeQuestion.question, autoBoundMortgageAssignmentId, clients, launchedAssignment, selectClient]);
 
   useEffect(() => {
     if (!launchedAssignment || !launchedAssignment.module.endsWhenCompleted || launchedAssignment.status === "completed") {
@@ -199,7 +239,17 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
       return;
     }
 
-    recordTrainingReport();
+    recordTrainingReport({
+      moduleId: launchedAssignment.module.id,
+      moduleTitle: launchedAssignment.module.title,
+      moduleScore,
+      moduleSummary: launchedAssignment.module.completionLabel,
+      moduleScoreCards: moduleScoreCards.map((card) => ({
+        label: card.label,
+        score: card.score,
+        summary: card.summary ?? ""
+      }))
+    });
     if (!isPaused) {
       togglePause();
     }
@@ -262,7 +312,15 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
 
   const showPlannerTools = launchedAssignment.module.workspace === "full-access";
   const showFullAccessControls = launchedAssignment.module.workspace === "full-access";
-  const brandTitle = showFullAccessControls ? "Fiduciary Duty — Training" : `Fiduciary Duty — ${launchedAssignment.module.title}`;
+  const topBarTitle = showFullAccessControls ? "Fiduciary Duty - Training" : `Fiduciary Duty - ${launchedAssignment.module.title}`;
+  const assignmentRibbonCard =
+    launchedAssignment.module.workspace === "mortgage-debt-planning" && launchedAssignment.assignedMortgageRate !== null
+      ? {
+          label: "Assigned File",
+          title: `${(launchedAssignment.assignedMortgageRate * 100).toFixed(2)}% mortgage`,
+          detail: formatAssignmentScenarioTitle(launchedAssignment.assignedMortgageScenarioId) ?? "Locked mortgage scenario"
+        }
+      : null;
   const focusedRibbonItems =
     launchedAssignment.module.workspace === "exam-foundations"
       ? ["score", "timer", "study", "trainee", "coach"] as const
@@ -271,7 +329,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
         : launchedAssignment.module.workspace === "retirement-planning"
           ? ["score", "client", "timer", "sec", "trainee", "coach", "calendar"] as const
           : launchedAssignment.module.workspace === "mortgage-debt-planning"
-            ? ["score", "timer", "calendar"] as const
+            ? ["score", "assignment", "timer", "calendar"] as const
             : launchedAssignment.module.workspace === "bank-lending"
               ? ["score", "timer", "calendar"] as const
               : launchedAssignment.module.workspace === "client-meeting-readiness"
@@ -281,7 +339,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
   return (
     <main className="layout">
       <TopBar
-        brandTitle="Fiduciary Duty — Training"
+        brandTitle={topBarTitle}
         showPlannerTools={showPlannerTools}
         showDifficultyControls={showFullAccessControls}
         showNewSessionButton={showFullAccessControls}
@@ -289,6 +347,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
         showSessionManager={showFullAccessControls}
         showReloadBank={showFullAccessControls}
         visibleRibbonItems={showFullAccessControls ? undefined : (focusedRibbonItems ? [...focusedRibbonItems] : undefined)}
+        assignmentRibbonCard={assignmentRibbonCard}
         extraControls={(
           <>
             <button type="button" className="control-btn" onClick={() => setLaunchedAssignmentId(null)}>

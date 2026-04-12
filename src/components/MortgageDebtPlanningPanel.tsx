@@ -27,12 +27,78 @@ function formatPercent(value: number) {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function buildScenarioDecisionGuide(
+  scenarioId: string | null,
+  activeClient: NonNullable<ReturnType<typeof useSelectedClient>>,
+  relevantPrograms: typeof MORTGAGE_LOAN_PROGRAMS
+) {
+  const firstProgram = (programId: string) => relevantPrograms.find((program) => program.id === programId) ?? null;
+  const purchaseProfile = activeClient.mortgagePurchaseProfile ?? null;
+  const locationLabel = purchaseProfile ? `${purchaseProfile.city}, ${purchaseProfile.stateCode}` : activeClient.name;
+
+  switch (scenarioId) {
+    case "first-time-buyer": {
+      const targetTooHigh =
+        purchaseProfile !== null
+        && purchaseProfile.targetPurchasePrice > purchaseProfile.maxComfortPurchasePrice;
+      const recommendedProgram = targetTooHigh
+        ? firstProgram("state-hfa")
+          ?? firstProgram("local-dpa")
+          ?? firstProgram("fha")
+        : firstProgram("fha")
+          ?? firstProgram("state-hfa")
+          ?? firstProgram("conventional-fixed");
+      return {
+        prompt: purchaseProfile
+          ? `What loan lane best fits ${activeClient.name} for a ${purchaseProfile.propertyType.toLowerCase()} purchase in ${locationLabel} with a target price near ${formatCurrency(purchaseProfile.targetPurchasePrice)}?`
+          : `Which loan would be best for ${activeClient.name} based on this first-time buyer file?`,
+        answer: targetTooHigh
+          ? `${recommendedProgram?.name ?? "FHA / first-time-buyer assistance"} on a lower purchase price, not the current target home`
+          : recommendedProgram?.name ?? "FHA or first-time-buyer assistance lane",
+        rationale: targetTooHigh
+          ? `The file is not just about approval. The current target home is priced above the family's comfort lane, so the training answer is to reset the home search or add more cash reserves rather than force a thin approval.`
+          : activeClient.creditProfile.score < 720 || activeClient.mortgageProfile.closingCostSensitivity === "High"
+            ? "This file points toward a first-time-buyer-friendly lane that protects cash to close and gives more flexibility on credit and reserves."
+            : "This file can support a cleaner first-home lane, but only if reserves remain intact after closing."
+      };
+    }
+    case "fha-vs-conventional": {
+      const useFha = activeClient.creditProfile.score < 720 || activeClient.mortgageProfile.closingCostSensitivity === "High";
+      const recommendedProgram = useFha ? firstProgram("fha") : firstProgram("conventional-fixed");
+      return {
+        prompt: `Should ${activeClient.name} be guided toward FHA or conventional financing?`,
+        answer: recommendedProgram?.name ?? (useFha ? "FHA" : "Conventional Fixed"),
+        rationale: useFha
+          ? "FHA is the better starting lane here because it is more forgiving for a thinner file and helps protect liquidity."
+          : "Conventional is the better lane when the borrower can support stronger pricing and cleaner long-run mortgage-insurance economics."
+      };
+    }
+    case "investor-property": {
+      const recommendedProgram = firstProgram("jumbo") ?? firstProgram("conventional-fixed");
+      return {
+        prompt: `What lending lane best fits ${activeClient.name}'s investor-property case?`,
+        answer: recommendedProgram?.name ?? "Conditional investor-property lane",
+        rationale: "Investor-property files should be treated more conservatively, with stronger reserve and coverage expectations than an owner-occupied home."
+      };
+    }
+    case "rate-lock":
+    default: {
+      const recommendedProgram = firstProgram("conventional-fixed") ?? firstProgram("conventional-arm");
+      return {
+        prompt: `What is the best recommendation for ${activeClient.name}'s current mortgage file?`,
+        answer: recommendedProgram?.name ?? "Stay with current lane and use a disciplined lock decision",
+        rationale: "The right training answer here is not just product choice. It is whether payment savings, timing, and lock cost actually make the move worthwhile."
+      };
+    }
+  }
+}
+
 export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPanelProps) {
   const activeClient = useSelectedClient();
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>("first-time-buyer");
   const [workspaceMode, setWorkspaceMode] = useState<MortgageWorkspaceMode>("refinance");
   const [adviceAction, setAdviceAction] = useState<MortgageAdviceAction | null>(null);
   const stateProfile = useMemo(() => getMortgageStateProfile(assignment.jurisdictionCode), [assignment.jurisdictionCode]);
+  const purchaseProfile = activeClient?.mortgagePurchaseProfile ?? null;
 
   const mortgageSnapshot = useMemo(
     () => activeClient ? buildMortgageRefiCalculator(activeClient) : null,
@@ -58,7 +124,10 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
     () => activeClient ? buildMortgageTrainingScenarios(activeClient, stateProfile) : [],
     [activeClient, stateProfile]
   );
-  const selectedScenario = trainingScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? trainingScenarios[0] ?? null;
+  const selectedScenario =
+    trainingScenarios.find((scenario) => scenario.id === assignment.assignedMortgageScenarioId)
+    ?? trainingScenarios[0]
+    ?? null;
 
   const [refiRate, setRefiRate] = useState(0.06);
   const [refiClosingCosts, setRefiClosingCosts] = useState(7000);
@@ -73,16 +142,19 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
       return;
     }
 
-    setRefiRate(Number(Math.max(0.04, mortgageSnapshot.proposedRate).toFixed(4)));
+    setRefiRate(Number((assignment.assignedMortgageRate ?? Math.max(0.04, mortgageSnapshot.proposedRate)).toFixed(4)));
     setRefiClosingCosts(mortgageSnapshot.closingCosts);
     setRefiStayMonths(Math.max(12, activeClient.mortgageProfile.refinanceHorizonMonths || 60));
-    setPurchasePrice(Math.max(240000, activeClient.debtProfile.propertyValue || 525000));
-    setDownPaymentPct(activeClient.id === "first_home_family" ? 0.08 : 0.15);
-    setPurchaseRate(Number(Math.max(0.045, activeClient.debtProfile.mortgageRate || 0.064).toFixed(4)));
+    const defaultPurchasePrice = purchaseProfile?.targetPurchasePrice ?? activeClient.debtProfile.propertyValue ?? 525000;
+    setPurchasePrice(Math.max(240000, defaultPurchasePrice));
+    setDownPaymentPct(purchaseProfile?.targetDownPaymentPct ?? (activeClient.id === "first_home_family" ? 0.08 : 0.15));
+    const localRateAdjustment = (purchaseProfile?.localRateAdjustmentBps ?? 0) / 10000;
+    const basePurchaseRate = assignment.assignedMortgageRate ?? activeClient.debtProfile.mortgageRate ?? 0.064;
+    setPurchaseRate(Number(Math.max(0.045, basePurchaseRate + localRateAdjustment).toFixed(4)));
     setPurchaseTermYears(activeClient.debtProfile.mortgageTermYearsRemaining > 0 ? activeClient.debtProfile.mortgageTermYearsRemaining : 30);
     setWorkspaceMode(activeClient.debtProfile.mortgageBalance > 0 ? "refinance" : "purchase");
     setAdviceAction(null);
-  }, [activeClient, mortgageSnapshot]);
+  }, [activeClient, assignment.assignedMortgageRate, mortgageSnapshot, purchaseProfile]);
 
   const relevantPrograms = useMemo(() => {
     if (!activeClient) {
@@ -105,6 +177,12 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
       return true;
     }).slice(0, 6);
   }, [activeClient, purchasePrice]);
+  const scenarioDecisionGuide = useMemo(
+    () => activeClient
+      ? buildScenarioDecisionGuide(assignment.assignedMortgageScenarioId, activeClient, relevantPrograms)
+      : null,
+    [activeClient, assignment.assignedMortgageScenarioId, relevantPrograms]
+  );
 
   const refinanceResult = useMemo(() => {
     if (!activeClient || !mortgageSnapshot) {
@@ -173,16 +251,17 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
     }
 
     if (adviceAction === "purchase" && purchaseResult) {
+      const availableCashToClose = purchaseProfile?.availableCashToClose ?? activeClient.cash;
       return {
         title: "Purchase recommendation",
-        detail: purchaseResult.estimatedCashToClose > activeClient.cash
-          ? "This purchase lane is too aggressive because cash to close would exhaust the family’s liquidity. Coach the trainee to lower price, increase savings runway, or use a smaller down payment strategically."
+        detail: purchaseResult.estimatedCashToClose > availableCashToClose
+          ? "This purchase lane is too aggressive because cash to close would exhaust the family's intended home-buying liquidity. Coach the trainee to lower price, increase savings runway, or use a smaller down payment strategically."
           : `${activeClient.name.split(" ")[0]} can support this purchase lane if the total housing payment of ${formatCurrency(purchaseResult.totalHousingPayment)} still leaves emergency reserves intact after closing.`
       };
     }
 
     return null;
-  }, [activeClient, adviceAction, purchaseResult, refinanceResult]);
+  }, [activeClient, adviceAction, purchaseProfile, purchaseResult, refinanceResult]);
 
   if (!activeClient) {
     return <section className="panel"><div className="empty-state">Select a household or client to open the mortgage and debt planning workspace.</div></section>;
@@ -193,15 +272,36 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
     : 0;
   const reserveTarget = (activeClient.cashFlow.monthlyExpenses + activeClient.cashFlow.monthlyDebtPayments) * activeClient.cashFlow.emergencyReserveMonths;
   const reserveGap = Math.max(0, reserveTarget - activeClient.cash);
+  const localRateAdjustmentPct = (purchaseProfile?.localRateAdjustmentBps ?? 0) / 100;
+  const localHousingCarry = activeClient.mortgageProfile.propertyTaxMonthly
+    + activeClient.mortgageProfile.homeownerInsuranceMonthly
+    + (purchaseProfile?.hoaMonthly ?? 0);
 
   return (
     <section className="panel mortgage-workspace-panel">
       <div className="panel-header mortgage-workspace-header">
         <h2>Mortgage and Debt Planning</h2>
         <span className="panel-meta">{activeClient.name} | Housing, refinance, purchase, and debt-fit review</span>
+        {selectedScenario ? (
+          <span className="panel-meta">Assigned scenario: {selectedScenario.title}</span>
+        ) : null}
       </div>
       <div className="mortgage-workspace-body">
         <div className="comparison-grid">
+          {scenarioDecisionGuide ? (
+            <>
+              <div className="comparison-card">
+                <span>Scenario prompt</span>
+                <strong>{scenarioDecisionGuide.prompt}</strong>
+                <small>{scenarioDecisionGuide.rationale}</small>
+              </div>
+              <div className="comparison-card">
+                <span>Best-fit loan lane</span>
+                <strong>{scenarioDecisionGuide.answer}</strong>
+                <small>This is the recommendation the trainee should be able to defend from the file facts.</small>
+              </div>
+            </>
+          ) : null}
           <div className="comparison-card">
             <span>Credit posture</span>
             <strong>{activeClient.creditProfile.score} | {activeClient.creditProfile.scoreBand}</strong>
@@ -214,14 +314,33 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
           </div>
           <div className="comparison-card">
             <span>Mortgage lane</span>
-            <strong>{mortgageScenario ? `${(mortgageScenario.currentLtv * 100).toFixed(0)}% LTV | ${(mortgageScenario.backEndDti * 100).toFixed(0)}% DTI` : "Purchase case"}</strong>
-            <small>{mortgageScenario?.scenarioSummary ?? "Use the purchase track to model affordability, PMI, and cash-to-close discipline."}</small>
+            <strong>{mortgageScenario ? `${(mortgageScenario.currentLtv * 100).toFixed(0)}% LTV | ${(mortgageScenario.backEndDti * 100).toFixed(0)}% DTI` : "No current mortgage on file"}</strong>
+            <small>{mortgageScenario?.scenarioSummary ?? "This file is a purchase case, so the trainee should be judged on affordability, PMI, cash-to-close, and reserve protection instead of refinance math."}</small>
           </div>
           <div className="comparison-card">
             <span>Reserve position</span>
             <strong>{reserveGap > 0 ? formatCurrency(reserveGap) : "Funded"}</strong>
             <small>{reserveGap > 0 ? "Emergency reserve still needs work before stretching into more debt." : "Reserve target is currently covered."}</small>
           </div>
+          {purchaseProfile ? (
+            <>
+              <div className="comparison-card">
+                <span>Purchase file</span>
+                <strong>{purchaseProfile.city}, {purchaseProfile.stateCode} | {purchaseProfile.propertyType}</strong>
+                <small>{purchaseProfile.metroArea} | {purchaseProfile.county} | {purchaseProfile.localMarketPressure} local market pressure</small>
+              </div>
+              <div className="comparison-card">
+                <span>Target vs comfort lane</span>
+                <strong>{formatCurrency(purchaseProfile.targetPurchasePrice)} target | {formatCurrency(purchaseProfile.maxComfortPurchasePrice)} comfort</strong>
+                <small>Available cash to close is about {formatCurrency(purchaseProfile.availableCashToClose)} with a {Math.round(purchaseProfile.targetDownPaymentPct * 100)}% target down payment.</small>
+              </div>
+              <div className="comparison-card">
+                <span>Local market carry</span>
+                <strong>{formatPercent(purchaseRate)} modeled rate | +{localRateAdjustmentPct.toFixed(2)}% local adjustment</strong>
+                <small>{purchaseProfile.localHousingNote} Monthly tax, insurance, and HOA carry is about {formatCurrency(localHousingCarry)}.</small>
+              </div>
+            </>
+          ) : null}
         </div>
 
         <div className="portfolio-section">
@@ -291,7 +410,7 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
               <div className="planner-tool-inputs">
                 <label>
                   Purchase price
-                  <input type="range" min="220000" max="950000" step="5000" value={purchasePrice} onChange={(event) => setPurchasePrice(Number(event.target.value))} />
+                  <input type="range" min="220000" max="1500000" step="5000" value={purchasePrice} onChange={(event) => setPurchasePrice(Number(event.target.value))} />
                   <small>{formatCurrency(purchasePrice)}</small>
                 </label>
                 <label>
@@ -324,9 +443,16 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
                   </div>
                   <div className="comparison-card">
                     <span>Affordability lens</span>
-                    <strong>{purchaseResult.estimatedCashToClose > activeClient.cash ? "Too cash-heavy" : "Potentially supportable"}</strong>
-                    <small>{purchaseResult.estimatedCashToClose > activeClient.cash ? "The modeled cash to close exceeds current liquidity." : "Check post-close reserves before approving the lane."}</small>
+                    <strong>{purchaseResult.estimatedCashToClose > (purchaseProfile?.availableCashToClose ?? activeClient.cash) ? "Too cash-heavy" : "Potentially supportable"}</strong>
+                    <small>{purchaseResult.estimatedCashToClose > (purchaseProfile?.availableCashToClose ?? activeClient.cash) ? "The modeled cash to close exceeds the file's intended closing liquidity." : "Check post-close reserves before approving the lane."}</small>
                   </div>
+                  {purchaseProfile ? (
+                    <div className="comparison-card">
+                      <span>Target-home reality check</span>
+                      <strong>{purchasePrice > purchaseProfile.maxComfortPurchasePrice ? "Target home is above the comfort lane" : "Target home is inside the comfort lane"}</strong>
+                      <small>{purchasePrice > purchaseProfile.maxComfortPurchasePrice ? `At ${formatCurrency(purchasePrice)}, the trainee should discuss lowering the target price or delaying purchase instead of treating approval as success.` : "The modeled price remains inside the more defensible comfort lane for this file."}</small>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <div className="insurance-actions">
@@ -366,22 +492,10 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
 
         <div className="portfolio-section">
           <div className="portfolio-section-title">Mortgage Scenario Track</div>
-          <div className="tabs">
-            {trainingScenarios.map((scenario) => (
-              <button
-                key={scenario.id}
-                type="button"
-                className={selectedScenario?.id === scenario.id ? "tab-btn active" : "tab-btn"}
-                onClick={() => setSelectedScenarioId(scenario.id)}
-              >
-                {scenario.title}
-              </button>
-            ))}
-          </div>
           {selectedScenario ? (
             <div className="comparison-grid">
               <div className="comparison-card">
-                <span>Scenario lane</span>
+                <span>Locked assignment scenario</span>
                 <strong>{selectedScenario.title}</strong>
                 <small>{selectedScenario.summary}</small>
               </div>
@@ -445,3 +559,4 @@ export function MortgageDebtPlanningPanel({ assignment }: MortgageDebtPlanningPa
     </section>
   );
 }
+

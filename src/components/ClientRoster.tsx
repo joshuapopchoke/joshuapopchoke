@@ -99,6 +99,16 @@ export function ClientRoster({ mode = "default", showPlayerAccount = true }: Cli
       return client.lendingProfile.underwritingTrack !== "Institutional" || client.id === "institutional";
     }
     return true;
+  }).sort((left, right) => {
+    if (mode === "mortgage") {
+      if (left.id === "first_home_family") {
+        return -1;
+      }
+      if (right.id === "first_home_family") {
+        return 1;
+      }
+    }
+    return 0;
   });
 
   return (

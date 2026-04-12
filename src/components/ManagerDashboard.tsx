@@ -52,6 +52,34 @@ function formatStamp(value: number) {
   });
 }
 
+function formatMortgageRate(value: number | null) {
+  if (value === null) {
+    return null;
+  }
+
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatScenarioTitle(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function weakestAssessmentLine(moduleScoreCards: Array<{ label: string; score: number }> | null | undefined) {
+  if (!moduleScoreCards || moduleScoreCards.length === 0) {
+    return null;
+  }
+
+  const weakestCard = [...moduleScoreCards].sort((left, right) => left.score - right.score)[0];
+  return `Support next: ${weakestCard.label} (${weakestCard.score}/100)`;
+}
+
 export function ManagerDashboard({
   currentUser,
   users,
@@ -73,6 +101,7 @@ export function ManagerDashboard({
   const employeeCards = useMemo(() => employeeUsers.map((user) => {
     const reports = trainingReports.filter((report) => report.traineeId === user.id);
     const latestReport = reports[0] ?? null;
+    const latestModuleReport = reports.find((report) => report.moduleId !== null) ?? null;
     const averageOverall = reports.length === 0 ? 0 : reports.reduce((sum, report) => sum + report.overall.score, 0) / reports.length;
     const trainee = trainees.find((entry) => entry.id === user.id) ?? null;
 
@@ -81,6 +110,7 @@ export function ManagerDashboard({
       trainee,
       reports,
       latestReport,
+      latestModuleReport,
       averageOverall
     };
   }), [employeeUsers, trainees, trainingReports]);
@@ -382,20 +412,27 @@ export function ManagerDashboard({
           <div className="manager-panel-body manager-report-list">
             {employeeCards.length === 0 ? (
               <div className="empty-state">Create employee accounts to begin tracking progress.</div>
-            ) : employeeCards.map(({ user, latestReport, reports }) => (
+            ) : employeeCards.map(({ user, latestReport, latestModuleReport, reports }) => (
               <div key={`${user.id}-report`} className="portfolio-summary-card manager-report-card">
                 <span>{user.displayName}</span>
-                <strong>{latestReport ? `Readiness ${latestReport.overall.grade} (${latestReport.overall.score}/100)` : "No score yet"}</strong>
+                <strong>{latestModuleReport ? `${latestModuleReport.moduleTitle} ${latestModuleReport.moduleScore}/100` : latestReport ? `Readiness ${latestReport.overall.grade} (${latestReport.overall.score}/100)` : "No score yet"}</strong>
                 <small>
-                  {latestReport
+                  {latestModuleReport
+                    ? `${DIFFICULTY_LABELS[latestModuleReport.difficulty]} | ${latestModuleReport.moduleSummary ?? "Module completion recorded"}`
+                    : latestReport
                     ? `${DIFFICULTY_LABELS[latestReport.difficulty]} | Exam ${latestReport.examReadiness.grade} | Advisor ${latestReport.advisorPerformance.grade} | Compliance ${latestReport.compliance.grade}`
                     : "Waiting for the first completed session."}
                 </small>
                 <small>
-                  {latestReport
+                  {latestModuleReport
+                    ? latestModuleReport.moduleScoreCards.map((card) => `${card.label} ${card.score}/100`).join(" | ")
+                    : latestReport
                     ? `${latestReport.correctAnswers}/${latestReport.answeredQuestions} correct | ${latestReport.studyAccuracy.toFixed(0)}% accuracy | ${latestReport.clientCount} retained / ${latestReport.lostClientCount} lost`
                     : `${reports.length} logged sessions`}
                 </small>
+                {latestModuleReport ? (
+                  <small>{weakestAssessmentLine(latestModuleReport.moduleScoreCards) ?? "No coaching flags yet."}</small>
+                ) : null}
               </div>
             ))}
           </div>
@@ -462,13 +499,24 @@ export function ManagerDashboard({
                 ?? "Assigned trainee";
 
               return (
-                <div key={snapshot.assignmentId} className="portfolio-summary-card manager-report-card">
+              <div key={snapshot.assignmentId} className="portfolio-summary-card manager-report-card">
                   <span>{employeeName}</span>
                   <strong>{snapshot.module.title}</strong>
                   <small>{snapshot.module.focus} | {DIFFICULTY_LABELS[snapshot.module.requiredDifficulty ?? "learner"]} | {snapshot.status.replace("-", " ")} | {snapshot.completionPercent}% ready</small>
                   {snapshot.jurisdictionCode ? <small>State overlay: {getStateName(snapshot.jurisdictionCode)}</small> : null}
+                  {snapshot.assignedMortgageRate !== null ? <small>Locked rate: {formatMortgageRate(snapshot.assignedMortgageRate)}</small> : null}
+                  {snapshot.assignedMortgageScenarioId ? <small>Locked scenario: {formatScenarioTitle(snapshot.assignedMortgageScenarioId)}</small> : null}
                   <small>{snapshot.module.completionLabel}</small>
-                  <small>{snapshot.dueAt ? `Due ${new Date(snapshot.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "No due date"}{snapshot.bestMatchingReport ? ` | Best ${snapshot.bestMatchingReport.overall.grade}` : ""}</small>
+                  <small>{snapshot.dueAt ? `Due ${new Date(snapshot.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "No due date"}{snapshot.bestMatchingReport ? ` | Best ${snapshot.bestMatchingReport.moduleScore ?? snapshot.bestMatchingReport.overall.score}/100` : ""}</small>
+                  {snapshot.bestMatchingReport?.moduleId === snapshot.module.id && snapshot.bestMatchingReport.moduleScore !== null ? (
+                    <>
+                      <small>Module score: {snapshot.bestMatchingReport.moduleScore}/100</small>
+                      <small>{weakestAssessmentLine(snapshot.bestMatchingReport.moduleScoreCards) ?? "No coaching flags yet."}</small>
+                      {snapshot.bestMatchingReport.moduleScoreCards.map((card) => (
+                        <small key={`${snapshot.assignmentId}-${card.label}`}>{card.label}: {card.score}/100{card.summary ? ` | ${card.summary}` : ""}</small>
+                      ))}
+                    </>
+                  ) : null}
                   <div className="slot-actions">
                     <button type="button" className="control-btn" onClick={() => onRemoveModule(snapshot.assignmentId)}>
                       Remove Module

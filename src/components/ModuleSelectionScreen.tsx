@@ -20,6 +20,25 @@ function formatDueDate(value: number | null) {
   });
 }
 
+function formatMortgageRate(value: number | null) {
+  if (value === null) {
+    return null;
+  }
+
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatScenarioTitle(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function ModuleSelectionScreen({
   assignments,
   selectedAssignmentId,
@@ -61,6 +80,8 @@ export function ModuleSelectionScreen({
                 <strong>{assignment.module.title}</strong>
                 <small>{assignment.module.description}</small>
                 {assignment.jurisdictionCode ? <small>State overlay: {getStateName(assignment.jurisdictionCode)}</small> : null}
+                {assignment.assignedMortgageRate !== null ? <small>Locked rate: {formatMortgageRate(assignment.assignedMortgageRate)}</small> : null}
+                {assignment.assignedMortgageScenarioId ? <small>Locked scenario: {formatScenarioTitle(assignment.assignedMortgageScenarioId)}</small> : null}
                 <small>{assignment.module.completionLabel}</small>
                 <small>Due {formatDueDate(assignment.dueAt)} | {assignment.status.replace("-", " ")}</small>
                 <div className="study-meter-track">
@@ -76,6 +97,8 @@ export function ModuleSelectionScreen({
               <span>Ready to begin</span>
               <strong>{selectedAssignment.module.title}</strong>
               {selectedAssignment.jurisdictionCode ? <small>State overlay: {getStateName(selectedAssignment.jurisdictionCode)}</small> : null}
+              {selectedAssignment.assignedMortgageRate !== null ? <small>Locked rate: {formatMortgageRate(selectedAssignment.assignedMortgageRate)}</small> : null}
+              {selectedAssignment.assignedMortgageScenarioId ? <small>Locked scenario: {formatScenarioTitle(selectedAssignment.assignedMortgageScenarioId)}</small> : null}
               <small>{selectedAssignment.module.focus} | {selectedAssignment.module.completionLabel}</small>
               <div className="slot-actions">
                 <button

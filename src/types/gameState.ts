@@ -280,6 +280,12 @@ export interface TrainingLaneResult {
   summary: string;
 }
 
+export interface ModuleAssessmentCard {
+  label: string;
+  score: number;
+  summary: string;
+}
+
 export interface TraineeProfile {
   id: string;
   name: string;
@@ -293,6 +299,8 @@ export interface TrainingAssignment {
   moduleId: string;
   assignedDifficulty: PlayDifficulty | null;
   jurisdictionCode: string | null;
+  assignedMortgageRate: number | null;
+  assignedMortgageScenarioId: string | null;
   assignedAt: number;
   dueAt: number | null;
   status: "pending" | "in-progress" | "completed";
@@ -305,6 +313,11 @@ export interface TrainingSessionReport {
   traineeName: string;
   difficulty: PlayDifficulty;
   endedAt: number;
+  moduleId: string | null;
+  moduleTitle: string | null;
+  moduleScore: number | null;
+  moduleSummary: string | null;
+  moduleScoreCards: ModuleAssessmentCard[];
   overall: TrainingLaneResult;
   examReadiness: TrainingLaneResult;
   advisorPerformance: TrainingLaneResult;

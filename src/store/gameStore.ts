@@ -6,6 +6,7 @@ import { getBehaviorScenario } from "../data/clientBehaviorEvents";
 import { getClientMeetingScenario, getClientReviewMeetingScenario } from "../data/clientMeetings";
 import { getInsuranceDialogue } from "../data/insuranceDialogues";
 import { INSURANCE_PRODUCTS } from "../data/insuranceProducts";
+import { MORTGAGE_TRAINING_SCENARIO_IDS } from "../data/mortgageTrainingScenarios";
 import { TRAINING_MODULES } from "../data/trainingModules";
 import { buildSupervisionRequest } from "../data/supervisionRequests";
 import { advanceTradingDate, createInitialMarketDate, deriveMarketDateTime, hasAdvancedMarketStep, parseMarketDate } from "../engine/marketClock";
@@ -47,6 +48,7 @@ import type {
   RecommendationDialogueState,
   SaveSlotId,
   SaveSlotSummary,
+  ModuleAssessmentCard,
   TrainingAssignment,
   TrainingSessionReport,
   SupervisionRequestState,
@@ -167,6 +169,16 @@ function createDefaultTrainees(): TraineeProfile[] {
 
 function createDefaultTrainingAssignments(): TrainingAssignment[] {
   return [];
+}
+
+function pickRandomMortgageRate() {
+  const rawRate = 0.055 + Math.random() * 0.03;
+  return Number(rawRate.toFixed(4));
+}
+
+function pickRandomMortgageScenarioId() {
+  const scenarioIndex = Math.floor(Math.random() * MORTGAGE_TRAINING_SCENARIO_IDS.length);
+  return MORTGAGE_TRAINING_SCENARIO_IDS[scenarioIndex] ?? MORTGAGE_TRAINING_SCENARIO_IDS[0];
 }
 
 function buildSessionReportKey(cycleNumber: number, difficulty: PlayDifficulty, traineeId: string) {
@@ -1185,7 +1197,7 @@ function applyDividendPayouts(
 }
 
 function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]) {
-  return clients.map((client, index) => {
+  const mergedClients = clients.map((client, index) => {
     const template = CLIENTS.find((entry) => entry.id === client.id) ?? CLIENTS[index] ?? CLIENTS[0];
     const mergedClient: ClientAccount = {
       ...template,
@@ -1259,6 +1271,36 @@ function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]
       advisorNote: mergedClient.advisorNote || mandate.note
     };
   });
+
+  const existingIds = new Set(mergedClients.map((client) => client.id));
+  const missingTemplates = CLIENTS
+    .filter((template) => !existingIds.has(template.id))
+    .map((template) => {
+      const clonedTemplate: ClientAccount = {
+        ...template,
+        holdings: {},
+        shortHoldings: {},
+        marginDebt: 0,
+        marginCall: false,
+        insuranceCoverage: [],
+        insurancePressure: 0,
+        insuranceGapScore: template.insuranceGapScore,
+        status: "pending",
+        sleeveCashBalances: { ...template.sleeveCashBalances },
+        holdingAccountMap: {},
+        shortHoldingAccountMap: {},
+        clientNotes: [...template.clientNotes]
+      };
+      clonedTemplate.cash = sumSleeveCashBalances(clonedTemplate.sleeveCashBalances);
+      const mandate = buildMandateSnapshot(clonedTemplate, tickers);
+      return {
+        ...clonedTemplate,
+        mandateScore: mandate.score,
+        advisorNote: clonedTemplate.advisorNote || mandate.note
+      };
+    });
+
+  return [...mergedClients, ...missingTemplates];
 }
 
 function computePersonalNetWorth(
@@ -1508,7 +1550,13 @@ type GameState = GameStateShape & {
   setActiveTrainee: (traineeId: string) => void;
   assignTrainingModule: (traineeId: string, moduleId: string, assignedDifficulty: PlayDifficulty, dueAt?: number | null, jurisdictionCode?: string | null) => void;
   removeTrainingModule: (assignmentId: string) => void;
-  recordTrainingReport: () => void;
+  recordTrainingReport: (moduleReport?: {
+    moduleId: string;
+    moduleTitle: string;
+    moduleScore: number;
+    moduleSummary: string;
+    moduleScoreCards: ModuleAssessmentCard[];
+  } | null) => void;
   setTab: (tab: AppTab) => void;
   selectTicker: (symbol: string) => void;
   selectClient: (clientId: string) => Promise<void>;
@@ -1847,7 +1895,16 @@ function buildSnapshot(state: GameState): PersistedGameSnapshot {
   };
 }
 
-function buildTrainingSessionReport(state: GameState): TrainingSessionReport {
+function buildTrainingSessionReport(
+  state: GameState,
+  moduleReport: {
+    moduleId: string;
+    moduleTitle: string;
+    moduleScore: number;
+    moduleSummary: string;
+    moduleScoreCards: ModuleAssessmentCard[];
+  } | null = null
+): TrainingSessionReport {
   const startingBook = CLIENTS.reduce((total, client) => total + client.startingAum, 0);
   const correctAnswers = state.questionOutcomes.filter((outcome) => outcome.correct).length;
   const answeredQuestions = state.questionOutcomes.length;
@@ -1873,6 +1930,11 @@ function buildTrainingSessionReport(state: GameState): TrainingSessionReport {
     traineeName: trainee?.name ?? "Primary Trainee",
     difficulty: state.activeDifficulty,
     endedAt: Date.now(),
+    moduleId: moduleReport?.moduleId ?? null,
+    moduleTitle: moduleReport?.moduleTitle ?? null,
+    moduleScore: moduleReport?.moduleScore ?? null,
+    moduleSummary: moduleReport?.moduleSummary ?? null,
+    moduleScoreCards: moduleReport?.moduleScoreCards ?? [],
     overall: summary.overall,
     examReadiness: summary.examReadiness,
     advisorPerformance: summary.advisorPerformance,
@@ -2242,9 +2304,19 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         return;
       }
 
-      if (!TRAINING_MODULES.some((module) => module.id === moduleId)) {
+      const moduleDefinition = TRAINING_MODULES.find((module) => module.id === moduleId);
+      if (!moduleDefinition) {
         return;
       }
+
+      const assignmentMortgageRate =
+        moduleDefinition.workspace === "mortgage-debt-planning"
+          ? pickRandomMortgageRate()
+          : null;
+      const assignmentMortgageScenarioId =
+        moduleDefinition.workspace === "mortgage-debt-planning"
+          ? pickRandomMortgageScenarioId()
+          : null;
 
       const existingAssignment = state.trainingAssignments.find((assignment) => assignment.traineeId === traineeId && assignment.moduleId === moduleId && assignment.status !== "completed");
       if (existingAssignment) {
@@ -2253,9 +2325,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             ...assignment,
             assignedDifficulty,
             jurisdictionCode,
+            assignedMortgageRate: assignmentMortgageRate,
+            assignedMortgageScenarioId: assignmentMortgageScenarioId,
             dueAt,
             status: "pending",
-            completedAt: null
+            completedAt: null,
+            assignedAt: Date.now()
           } : assignment)
         });
         return;
@@ -2267,6 +2342,8 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         moduleId,
         assignedDifficulty,
         jurisdictionCode,
+        assignedMortgageRate: assignmentMortgageRate,
+        assignedMortgageScenarioId: assignmentMortgageScenarioId,
         assignedAt: Date.now(),
         dueAt,
         status: "pending",
@@ -2283,14 +2360,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         trainingAssignments: state.trainingAssignments.filter((assignment) => assignment.id !== assignmentId)
       });
     },
-    recordTrainingReport: () => {
+    recordTrainingReport: (moduleReport = null) => {
       const state = get();
-      const nextSessionKey = buildSessionReportKey(state.cycleNumber, state.activeDifficulty, state.activeTraineeId);
+      const nextSessionKey = `${buildSessionReportKey(state.cycleNumber, state.activeDifficulty, state.activeTraineeId)}::${moduleReport?.moduleId ?? "session"}`;
       if (state.lastRecordedSessionKey === nextSessionKey) {
         return;
       }
 
-      const report = buildTrainingSessionReport(state);
+      const report = buildTrainingSessionReport(state, moduleReport);
       commit({
         trainingAssignments: updateAssignmentsFromReport(state.trainingAssignments, report),
         trainingReports: [report, ...state.trainingReports].slice(0, 60),
@@ -3992,8 +4069,23 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     state.workflowCooldownUntilCycle = Math.max(1, state.workflowCooldownUntilCycle ?? 1);
     state.trainees = Array.isArray(state.trainees) && state.trainees.length > 0 ? state.trainees : createDefaultTrainees();
     state.activeTraineeId = state.trainees.some((entry) => entry.id === state.activeTraineeId) ? state.activeTraineeId : state.trainees[0].id;
-    state.trainingAssignments = Array.isArray(state.trainingAssignments) ? state.trainingAssignments : createDefaultTrainingAssignments();
-    state.trainingReports = Array.isArray(state.trainingReports) ? state.trainingReports : [];
+    state.trainingAssignments = Array.isArray(state.trainingAssignments)
+      ? state.trainingAssignments.map((assignment) => ({
+          ...assignment,
+          assignedMortgageRate: typeof assignment.assignedMortgageRate === "number" ? assignment.assignedMortgageRate : null,
+          assignedMortgageScenarioId: typeof assignment.assignedMortgageScenarioId === "string" ? assignment.assignedMortgageScenarioId : null
+        }))
+      : createDefaultTrainingAssignments();
+    state.trainingReports = Array.isArray(state.trainingReports)
+      ? state.trainingReports.map((report) => ({
+          ...report,
+          moduleId: typeof report.moduleId === "string" ? report.moduleId : null,
+          moduleTitle: typeof report.moduleTitle === "string" ? report.moduleTitle : null,
+          moduleScore: typeof report.moduleScore === "number" ? report.moduleScore : null,
+          moduleSummary: typeof report.moduleSummary === "string" ? report.moduleSummary : null,
+          moduleScoreCards: Array.isArray(report.moduleScoreCards) ? report.moduleScoreCards : []
+        }))
+      : [];
     state.lastRecordedSessionKey = state.lastRecordedSessionKey ?? null;
     state.difficultySessions = state.difficultySessions ?? {};
     state.questionTracker = {

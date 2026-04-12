@@ -1,12 +1,14 @@
 import { TRAINING_MODULES, type TrainingModuleDefinition } from "../data/trainingModules";
 import type { TrainingPerformanceSummary } from "./trainingScoreEngine";
-import type { TrainingAssignment, TrainingSessionReport } from "../types/gameState";
+import type { ModuleAssessmentCard, TrainingAssignment, TrainingSessionReport } from "../types/gameState";
 
 export interface AssignmentProgressSnapshot {
   assignmentId: string;
   module: TrainingModuleDefinition;
   assignedDifficulty: TrainingSessionReport["difficulty"] | null;
   jurisdictionCode: string | null;
+  assignedMortgageRate: number | null;
+  assignedMortgageScenarioId: string | null;
   status: TrainingAssignment["status"];
   completionPercent: number;
   bestMatchingReport: TrainingSessionReport | null;
@@ -17,6 +19,7 @@ export interface AssignmentProgressSnapshot {
 export interface ModuleScoreCard {
   label: string;
   score: number;
+  summary?: string;
 }
 
 export interface ModuleLiveMetrics {
@@ -56,118 +59,220 @@ function effectiveModuleDifficulty(
   return assignment.assignedDifficulty ?? module.requiredDifficulty;
 }
 
-function moduleScoreFromReport(module: TrainingModuleDefinition, report: Pick<
-  TrainingSessionReport,
-  "examReadiness" | "advisorPerformance" | "clientOutcome" | "compliance" | "portfolioOutcome" | "overall"
->) {
+
+function roundScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function buildRegulatoryLens(module: TrainingModuleDefinition) {
   switch (module.workspace) {
     case "exam-foundations":
-      return Math.round(
-        report.examReadiness.score * 0.75 +
-        report.compliance.score * 0.15 +
-        report.advisorPerformance.score * 0.1
-      );
+      return "Exam-readiness and regulated-conduct coaching lens";
     case "suitability-client-fit":
-      return Math.round(
-        report.advisorPerformance.score * 0.45 +
-        report.compliance.score * 0.3 +
-        report.clientOutcome.score * 0.25
-      );
+      return "SEC Reg BI / FINRA-style recommendation review lens";
     case "retirement-planning":
-      return Math.round(
-        report.advisorPerformance.score * 0.3 +
-        report.clientOutcome.score * 0.25 +
-        report.portfolioOutcome.score * 0.25 +
-        report.compliance.score * 0.2
-      );
+      return "Investment-adviser fiduciary-care and retirement-planning review lens";
     case "mortgage-debt-planning":
-      return Math.round(
-        report.advisorPerformance.score * 0.35 +
-        report.clientOutcome.score * 0.3 +
-        report.compliance.score * 0.2 +
-        report.examReadiness.score * 0.15
-      );
+      return "CFPB ATR/QM, disclosure, and consumer-mortgage training review lens";
     case "bank-lending":
-      return Math.round(
-        report.compliance.score * 0.35 +
-        report.advisorPerformance.score * 0.35 +
-        report.clientOutcome.score * 0.2 +
-        report.examReadiness.score * 0.1
-      );
+      return "Bank underwriting, documentation, and repayment-capacity review lens";
     case "client-meeting-readiness":
-      return Math.round(
-        report.advisorPerformance.score * 0.4 +
-        report.compliance.score * 0.3 +
-        report.clientOutcome.score * 0.2 +
-        report.examReadiness.score * 0.1
-      );
+      return "Communication, conduct, and defensible-advice review lens";
     case "full-access":
     default:
-      return report.overall.score;
+      return "Integrated readiness, advice, and compliance review lens";
   }
 }
 
-export function buildModuleScoreCards(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics): ModuleScoreCard[] {
+function buildRegulatoryAlignedCards(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics): ModuleScoreCard[] {
   switch (module.workspace) {
     case "exam-foundations":
       return [
-        { label: "Exam readiness", score: metrics.summary.examReadiness.score },
-        { label: "Accuracy discipline", score: Math.round(metrics.studyAccuracy) },
-        { label: "Knowledge breadth", score: metrics.summary.compliance.score }
+        {
+          label: "Exam accuracy",
+          score: roundScore(metrics.summary.examReadiness.score * 0.75 + metrics.studyAccuracy * 0.25),
+          summary: "Measures how consistently the trainee answers assigned exam content correctly."
+        },
+        {
+          label: "Coverage depth",
+          score: metrics.summary.examReadiness.score,
+          summary: "Rewards touching the breadth of the assigned blueprint instead of memorizing one pocket."
+        },
+        {
+          label: "Compliance awareness",
+          score: metrics.summary.compliance.score,
+          summary: "Checks whether the trainee is absorbing regulated-conduct concepts while studying."
+        }
       ];
     case "suitability-client-fit":
       return [
-        { label: "Suitability", score: metrics.summary.advisorPerformance.score },
-        { label: "Compliance", score: metrics.summary.compliance.score },
-        { label: "Client fit", score: metrics.summary.clientOutcome.score }
+        {
+          label: "Best-interest care",
+          score: roundScore(metrics.summary.advisorPerformance.score * 0.7 + metrics.summary.clientOutcome.score * 0.3),
+          summary: "Measures whether the recommendation basis and client-specific judgment stay in the client's best interest."
+        },
+        {
+          label: "Supervisory controls",
+          score: metrics.summary.compliance.score,
+          summary: "Measures whether the trainee avoided suitability hits, concentration problems, and other review flags."
+        },
+        {
+          label: "Customer profile fit",
+          score: roundScore(metrics.summary.clientOutcome.score * 0.65 + metrics.summary.advisorPerformance.score * 0.35),
+          summary: "Measures whether product selection actually fits the customer's risk, objective, and mandate."
+        }
       ];
     case "retirement-planning":
       return [
-        { label: "Retirement judgment", score: metrics.summary.advisorPerformance.score },
-        { label: "Wealth protection", score: Math.round((metrics.summary.clientOutcome.score + metrics.summary.portfolioOutcome.score) / 2) },
-        { label: "Tax and compliance", score: metrics.summary.compliance.score }
+        {
+          label: "Fiduciary care",
+          score: roundScore(metrics.summary.advisorPerformance.score * 0.65 + metrics.summary.clientOutcome.score * 0.35),
+          summary: "Measures whether advice reflects prudent retirement judgment instead of product pushing."
+        },
+        {
+          label: "Income sustainability",
+          score: roundScore(metrics.summary.clientOutcome.score * 0.55 + metrics.summary.portfolioOutcome.score * 0.45),
+          summary: "Measures whether the plan protects long-term spending needs, reserves, and drawdown durability."
+        },
+        {
+          label: "Distribution discipline",
+          score: metrics.summary.compliance.score,
+          summary: "Measures whether the trainee handled retirement-account, withdrawal, and suitability issues cleanly."
+        }
       ];
     case "mortgage-debt-planning":
       return [
-        { label: "Debt analysis", score: metrics.summary.advisorPerformance.score },
-        { label: "Affordability fit", score: metrics.summary.clientOutcome.score },
-        { label: "Compliance discipline", score: metrics.summary.compliance.score }
+        {
+          label: "Ability-to-repay",
+          score: roundScore(metrics.summary.advisorPerformance.score * 0.6 + metrics.summary.clientOutcome.score * 0.4),
+          summary: "Measures whether the trainee recommended a mortgage lane the borrower can realistically carry."
+        },
+        {
+          label: "Disclosure and fair lending",
+          score: metrics.summary.compliance.score,
+          summary: "Measures whether the trainee stayed inside disclosure, timing, and consumer-protection expectations."
+        },
+        {
+          label: "Loan-fit judgment",
+          score: roundScore(metrics.summary.clientOutcome.score * 0.55 + metrics.summary.advisorPerformance.score * 0.45),
+          summary: "Measures whether the chosen loan lane matches the borrower's reserves, horizon, and risk profile."
+        }
       ];
     case "bank-lending":
       return [
-        { label: "Underwriting logic", score: metrics.summary.advisorPerformance.score },
-        { label: "Risk control", score: metrics.summary.compliance.score },
-        { label: "Decision consistency", score: metrics.summary.clientOutcome.score }
+        {
+          label: "Repayment capacity",
+          score: roundScore(metrics.summary.advisorPerformance.score * 0.6 + metrics.summary.clientOutcome.score * 0.4),
+          summary: "Measures whether the file was judged on cash flow, debt service, and ability to repay."
+        },
+        {
+          label: "Underwriting controls",
+          score: metrics.summary.compliance.score,
+          summary: "Measures whether the trainee respected documentation, collateral, and policy-control expectations."
+        },
+        {
+          label: "Credit decision discipline",
+          score: roundScore(metrics.summary.clientOutcome.score * 0.5 + metrics.summary.advisorPerformance.score * 0.5),
+          summary: "Measures whether approve, conditional, or decline decisions were defensible and consistent."
+        }
       ];
     case "client-meeting-readiness":
       return metrics.workspaceScoreCards ?? [
-        { label: "Communication", score: metrics.summary.advisorPerformance.score },
-        { label: "Compliance", score: metrics.summary.compliance.score },
-        { label: "Rational thinking", score: metrics.summary.clientOutcome.score }
+        { label: "Communication", score: metrics.summary.advisorPerformance.score, summary: "Measures whether the trainee explains advice clearly and professionally." },
+        { label: "Compliance", score: metrics.summary.compliance.score, summary: "Measures whether the trainee avoids unlawful or noncompliant language." },
+        { label: "Rational thinking", score: metrics.summary.clientOutcome.score, summary: "Measures whether the trainee's answer is coherent, suitable, and defensible." }
       ];
     case "full-access":
     default:
       return [
-        { label: "Exam readiness", score: metrics.summary.examReadiness.score },
-        { label: "Advisor judgment", score: metrics.summary.advisorPerformance.score },
-        { label: "Compliance", score: metrics.summary.compliance.score }
+        { label: "Exam readiness", score: metrics.summary.examReadiness.score, summary: "Knowledge and coverage across the active exam material." },
+        { label: "Advisor judgment", score: metrics.summary.advisorPerformance.score, summary: "Judgment across suitability, planning, and client stewardship." },
+        { label: "Compliance", score: metrics.summary.compliance.score, summary: "How cleanly the trainee stayed inside review and compliance expectations." }
       ];
   }
 }
 
-export function computeModuleScore(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics) {
+function regulatoryWeightMap(module: TrainingModuleDefinition) {
+  switch (module.workspace) {
+    case "exam-foundations":
+      return [0.5, 0.35, 0.15];
+    case "suitability-client-fit":
+      return [0.4, 0.35, 0.25];
+    case "retirement-planning":
+      return [0.35, 0.35, 0.3];
+    case "mortgage-debt-planning":
+      return [0.4, 0.25, 0.35];
+    case "bank-lending":
+      return [0.4, 0.3, 0.3];
+    case "client-meeting-readiness":
+      return [0.4, 0.3, 0.3];
+    case "full-access":
+    default:
+      return [0.35, 0.35, 0.3];
+  }
+}
+
+export function buildModuleAssessment(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics): {
+  moduleScore: number;
+  scoreCards: ModuleScoreCard[];
+  summary: string;
+} {
   if (module.workspace === "client-meeting-readiness" && typeof metrics.workspaceScoreOverride === "number") {
-    return metrics.workspaceScoreOverride;
+    const cards = (metrics.workspaceScoreCards ?? []).map((card) => ({ ...card }));
+    return {
+      moduleScore: metrics.workspaceScoreOverride,
+      scoreCards: cards,
+      summary: "Free-response module graded on communication, compliance, and reasoning."
+    };
   }
 
-  return moduleScoreFromReport(module, {
-    examReadiness: metrics.summary.examReadiness,
-    advisorPerformance: metrics.summary.advisorPerformance,
-    clientOutcome: metrics.summary.clientOutcome,
-    compliance: metrics.summary.compliance,
-    portfolioOutcome: metrics.summary.portfolioOutcome,
-    overall: metrics.summary.overall
-  });
+  const cards = buildRegulatoryAlignedCards(module, metrics);
+  const weights = regulatoryWeightMap(module);
+  const weightedScore = roundScore(cards.reduce((total, card, index) => total + card.score * (weights[index] ?? 0), 0));
+  const lens = buildRegulatoryLens(module);
+  return {
+    moduleScore: weightedScore,
+    scoreCards: cards,
+    summary: `${lens}. ${module.completionLabel}`
+  };
+}
+
+export function buildModuleAssessmentFromReport(module: TrainingModuleDefinition, report: TrainingSessionReport): {
+  moduleScore: number;
+  scoreCards: ModuleAssessmentCard[];
+  summary: string;
+} {
+  const metrics: ModuleLiveMetrics = {
+    difficulty: report.difficulty,
+    studyAccuracy: report.studyAccuracy,
+    answeredQuestions: report.answeredQuestions,
+    summary: {
+      examReadiness: report.examReadiness,
+      advisorPerformance: report.advisorPerformance,
+      clientOutcome: report.clientOutcome,
+      compliance: report.compliance,
+      portfolioOutcome: report.portfolioOutcome,
+      overall: report.overall
+    }
+  };
+  const assessment = buildModuleAssessment(module, metrics);
+  return {
+    moduleScore: assessment.moduleScore,
+    scoreCards: assessment.scoreCards.map((card) => ({
+      label: card.label,
+      score: card.score,
+      summary: card.summary ?? ""
+    })),
+    summary: assessment.summary
+  };
+}
+
+export function buildModuleScoreCards(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics): ModuleScoreCard[] {
+  return buildModuleAssessment(module, metrics).scoreCards;
+}
+
+export function computeModuleScore(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics) {
+  return buildModuleAssessment(module, metrics).moduleScore;
 }
 
 export function moduleReachedCompletion(module: TrainingModuleDefinition, metrics: ModuleLiveMetrics) {
@@ -189,17 +294,21 @@ function computeCompletionPercent(module: TrainingModuleDefinition, report: Trai
     ? 1
     : difficultyRank(report.difficulty) >= moduleDifficultyRank(module.requiredDifficulty) ? 1 : 0.45;
   const accuracyScore = module.minimumAccuracy <= 0 ? 1 : Math.min(report.studyAccuracy / module.minimumAccuracy, 1);
-  const moduleScore = module.completionScoreTarget === null ? 1 : Math.min(moduleScoreFromReport(module, report) / module.completionScoreTarget, 1);
+  const moduleScore = module.completionScoreTarget === null ? 1 : Math.min(buildModuleAssessmentFromReport(module, report).moduleScore / module.completionScoreTarget, 1);
   const answerVolumeScore = module.minimumAnsweredQuestions <= 0 ? 1 : Math.min(report.answeredQuestions / module.minimumAnsweredQuestions, 1);
 
   return Math.round((difficultyScore * 0.2 + accuracyScore * 0.25 + moduleScore * 0.4 + answerVolumeScore * 0.15) * 100);
 }
 
 function reportMatchesModule(module: TrainingModuleDefinition, report: TrainingSessionReport) {
+  if (report.moduleId && report.moduleId !== module.id) {
+    return false;
+  }
+
   return (
     (module.requiredDifficulty === null || difficultyRank(report.difficulty) >= moduleDifficultyRank(module.requiredDifficulty)) &&
     report.studyAccuracy >= module.minimumAccuracy &&
-    (module.completionScoreTarget === null || moduleScoreFromReport(module, report) >= module.completionScoreTarget) &&
+    (module.completionScoreTarget === null || buildModuleAssessmentFromReport(module, report).moduleScore >= module.completionScoreTarget) &&
     report.answeredQuestions >= module.minimumAnsweredQuestions
   );
 }
@@ -225,6 +334,8 @@ export function buildAssignmentSnapshots(assignments: TrainingAssignment[], repo
       module: moduleWithAssignedDifficulty,
       assignedDifficulty: assignment.assignedDifficulty,
       jurisdictionCode: assignment.jurisdictionCode ?? null,
+      assignedMortgageRate: assignment.assignedMortgageRate ?? null,
+      assignedMortgageScenarioId: assignment.assignedMortgageScenarioId ?? null,
       status: assignment.status,
       completionPercent: computeCompletionPercent(moduleWithAssignedDifficulty, bestMatchingReport),
       bestMatchingReport,
