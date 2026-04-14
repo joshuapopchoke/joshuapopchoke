@@ -18,6 +18,7 @@ import { buildRevenueSnapshot } from "../engine/revenueEngine";
 import { buildInterestRateSnapshot, refreshCallableBondTerms } from "../engine/rateEngine";
 import { buildRetirementIncomeSnapshot } from "../engine/retirementIncomeEngine";
 import { buildTaxManagementSnapshot } from "../engine/taxManagementEngine";
+import { getAllocationExposure, getAllocationPolicy } from "../engine/allocationPolicyEngine";
 import { updateAssignmentsFromReport } from "../engine/trainingCurriculumEngine";
 import { buildTrainingPerformanceSummary } from "../engine/trainingScoreEngine";
 import { createInsiderInfoEvent, evaluateInsiderDecision } from "../engine/playerComplianceEngine";
@@ -270,6 +271,73 @@ function adjustSleeveCashBalance(client: ClientAccount, sleeveId: string, delta:
   return setSleeveCashBalance(client, sleeveId, getSleeveCashBalance(client, sleeveId) + delta);
 }
 
+function findPositionKeyForSleeve(
+  holdings: Record<string, ClientHolding>,
+  accountMap: Record<string, string>,
+  ticker: string,
+  sleeveId: string
+) {
+  return Object.entries(holdings).find(([holdingKey, holding]) =>
+    holding.ticker === ticker && (accountMap[holdingKey] ?? "") === sleeveId
+  )?.[0] ?? null;
+}
+
+function createPositionKey(
+  holdings: Record<string, ClientHolding>,
+  ticker: string,
+  sleeveId: string
+) {
+  const baseKey = `${ticker}::${sleeveId}`;
+  if (!holdings[baseKey]) {
+    return baseKey;
+  }
+
+  let suffix = 2;
+  while (holdings[`${baseKey}::${suffix}`]) {
+    suffix += 1;
+  }
+
+  return `${baseKey}::${suffix}`;
+}
+
+function inferSleeveIdFromPositionKey(positionKey: string, ticker: string) {
+  if (!positionKey.startsWith(`${ticker}::`)) {
+    return null;
+  }
+
+  const suffix = positionKey.slice(ticker.length + 2);
+  const parts = suffix.split("::");
+  if (parts.length === 0) {
+    return null;
+  }
+
+  const maybeSequence = parts[parts.length - 1];
+  return /^\d+$/.test(maybeSequence) ? parts.slice(0, -1).join("::") : parts.join("::");
+}
+
+function normalizePositionAccountMap(
+  holdings: Record<string, ClientHolding>,
+  accountMap: Record<string, string> | undefined,
+  primarySleeveId: string
+) {
+  const nextMap = { ...(accountMap ?? {}) };
+
+  Object.entries(holdings).forEach(([holdingKey, holding]) => {
+    if (nextMap[holdingKey]) {
+      return;
+    }
+
+    const inferredSleeveId =
+      inferSleeveIdFromPositionKey(holdingKey, holding.ticker) ??
+      nextMap[holding.ticker] ??
+      primarySleeveId;
+
+    nextMap[holdingKey] = inferredSleeveId;
+  });
+
+  return nextMap;
+}
+
 function transferBetweenSleeves(client: ClientAccount, fromSleeveId: string, toSleeveId: string, amount: number) {
   const transferAmount = Math.max(0, Number(amount.toFixed(2)));
   const available = getSleeveCashBalance(client, fromSleeveId);
@@ -421,6 +489,7 @@ function buildMandateSnapshot(client: ClientAccount, tickers: GameState["tickers
   const holdings = Object.values(client.holdings);
   const portfolioBeta = computePortfolioBetaForAccount(client.holdings, client.shortHoldings ?? {}, tickers);
   const betaRange = betaRangeForRisk(client.riskProfile);
+  const allocationPolicy = getAllocationPolicy(client);
   const retirementSnapshot = buildRetirementIncomeSnapshot(client, tickers);
   const betaPenalty =
     portfolioBeta > betaRange.max ? Math.min(18, (portfolioBeta - betaRange.max) * 22) :
@@ -447,6 +516,7 @@ function buildMandateSnapshot(client: ClientAccount, tickers: GameState["tickers
   }
 
   const totalValue = holdings.reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+  const allocationExposure = getAllocationExposure(client.cash, client.holdings, tickers);
   const bucketWeights = holdings.reduce<Record<string, number>>((accumulator, holding) => {
     const ticker = tickers[holding.ticker];
     if (!ticker) {
@@ -463,10 +533,23 @@ function buildMandateSnapshot(client: ClientAccount, tickers: GameState["tickers
   const weight = (bucket: string) => totalValue === 0 ? 0 : ((bucketWeights[bucket] ?? 0) / totalValue) * 100;
   const alignedCategories = client.mandateTargets.filter((target) => weight(target) > 8);
   const targetScore = client.mandateTargets.reduce((score, target) => score + Math.min(weight(target), 35) * 0.9, 0);
-  const watchoutPenalty = client.watchouts.reduce((score, target) => score + weight(target) * 1.1, 0);
+  const watchoutPenalty = client.watchouts.reduce((score, target) => {
+    if (["funds", "fixedIncome", "bonds", "commodities"].includes(target)) {
+      return score;
+    }
+    return score + weight(target) * 1.1;
+  }, 0);
+  const allocationPenalty =
+    allocationExposure.totalAum <= 0
+      ? 0
+      : allocationExposure.equityExposure > allocationPolicy.maxEquityPct
+        ? Math.min(20, (allocationExposure.equityExposure - allocationPolicy.maxEquityPct) * 90)
+        : allocationExposure.equityExposure < allocationPolicy.minEquityPct
+          ? Math.min(14, (allocationPolicy.minEquityPct - allocationExposure.equityExposure) * 65)
+          : 0;
   const diversificationBonus = holdings.length >= 3 ? Math.min(15, holdings.length * 2) : 0;
   const score = clamp(
-    Math.round(18 + targetScore - watchoutPenalty + diversificationBonus - betaPenalty - insurancePenalty - liquidityPenalty - retirementPenalty),
+    Math.round(18 + targetScore - watchoutPenalty + diversificationBonus - allocationPenalty - betaPenalty - insurancePenalty - liquidityPenalty - retirementPenalty),
     0,
     100
   );
@@ -475,7 +558,7 @@ function buildMandateSnapshot(client: ClientAccount, tickers: GameState["tickers
     return {
       score,
       label: "Mandate fit strong",
-      note: `${client.name.split(" ")[0]} is seeing a portfolio mix that lines up with the stated goal, risk profile, and beta target.`,
+      note: `${client.name.split(" ")[0]} is seeing a portfolio mix that lines up with the stated goal, the ${client.investmentPolicy.equityRangeLabel ?? "current equity lane"}, and the current beta target.`,
       alignedCategories
     };
   }
@@ -1062,7 +1145,7 @@ function applyDividendPayoutsToHoldings(
   let stockDividendShares = 0;
   const nextHoldings = { ...holdings };
 
-  Object.values(holdings).forEach((holding) => {
+  Object.entries(holdings).forEach(([holdingKey, holding]) => {
     const ticker = tickers[holding.ticker];
     if (!ticker || !shouldPayDividend(ticker, cycleNumber)) {
       return;
@@ -1076,7 +1159,7 @@ function applyDividendPayoutsToHoldings(
     if (ticker.dividendPayoutType === "stock" && ticker.stockDividendRate) {
       const extraShares = Number((holding.shares * ticker.stockDividendRate).toFixed(4));
       if (extraShares > 0) {
-        nextHoldings[holding.ticker] = {
+        nextHoldings[holdingKey] = {
           ...holding,
           shares: Number((holding.shares + extraShares).toFixed(4))
         };
@@ -1099,14 +1182,14 @@ function buildDividendCashBySleeve(
 ) {
   const cashBySleeve: Record<string, number> = {};
 
-  Object.values(client.holdings).forEach((holding) => {
+  Object.entries(client.holdings).forEach(([holdingKey, holding]) => {
     const ticker = tickers[holding.ticker];
 
     if (!ticker || ticker.dividendPayoutType !== "cash" || !ticker.dividendYield || !shouldPayDividend(ticker, cycleNumber)) {
       return;
     }
 
-    const sleeveId = client.holdingAccountMap[holding.ticker] ?? clientPrimarySleeveId(client);
+    const sleeveId = client.holdingAccountMap[holdingKey] ?? clientPrimarySleeveId(client);
     const payout = holding.shares * ticker.price * (ticker.dividendYield / paymentsPerYear(ticker.dividendFrequency));
     cashBySleeve[sleeveId] = Number(((cashBySleeve[sleeveId] ?? 0) + payout).toFixed(2));
   });
@@ -1124,14 +1207,14 @@ function buildPersonalDividendCashBySleeve(
   const cashBySleeve: Record<string, number> = {};
   const primarySleeveId = personalPrimarySleeveId(sleeves);
 
-  Object.values(holdings).forEach((holding) => {
+  Object.entries(holdings).forEach(([holdingKey, holding]) => {
     const ticker = tickers[holding.ticker];
 
     if (!ticker || ticker.dividendPayoutType !== "cash" || !ticker.dividendYield || !shouldPayDividend(ticker, cycleNumber)) {
       return;
     }
 
-    const sleeveId = holdingAccountMap[holding.ticker] ?? primarySleeveId;
+    const sleeveId = holdingAccountMap[holdingKey] ?? primarySleeveId;
     const payout = holding.shares * ticker.price * (ticker.dividendYield / paymentsPerYear(ticker.dividendFrequency));
     cashBySleeve[sleeveId] = Number(((cashBySleeve[sleeveId] ?? 0) + payout).toFixed(2));
   });
@@ -1215,8 +1298,16 @@ function sanitizeClients(clients: ClientAccount[], tickers: GameState["tickers"]
         (client as ClientAccount).sleeveCashBalances,
         template.sleeveCashBalances
       ),
-      holdingAccountMap: client.holdingAccountMap ?? {},
-      shortHoldingAccountMap: client.shortHoldingAccountMap ?? {},
+      holdingAccountMap: normalizePositionAccountMap(
+        client.holdings ?? {},
+        client.holdingAccountMap,
+        (Array.isArray(client.accountSleeves) && client.accountSleeves.length > 0 ? client.accountSleeves : template.accountSleeves)[0]?.id ?? "primary"
+      ),
+      shortHoldingAccountMap: normalizePositionAccountMap(
+        client.shortHoldings ?? {},
+        client.shortHoldingAccountMap,
+        (Array.isArray(client.accountSleeves) && client.accountSleeves.length > 0 ? client.accountSleeves : template.accountSleeves)[0]?.id ?? "primary"
+      ),
       insuranceNeeds: Array.isArray(client.insuranceNeeds) ? client.insuranceNeeds : template.insuranceNeeds,
       insuranceCoverage: Array.isArray(client.insuranceCoverage) ? client.insuranceCoverage : template.insuranceCoverage,
       insurancePressure: typeof client.insurancePressure === "number" ? client.insurancePressure : template.insurancePressure,
@@ -1730,8 +1821,20 @@ function hydrateSnapshotMarketState(snapshot: PersistedGameSnapshot): PersistedG
       snapshot.personalPortfolioUsd
     ),
     personalShortHoldings: snapshot.personalShortHoldings ?? {},
-    personalHoldingAccountMap: snapshot.personalHoldingAccountMap ?? {},
-    personalShortHoldingAccountMap: snapshot.personalShortHoldingAccountMap ?? {},
+    personalHoldingAccountMap: normalizePositionAccountMap(
+      snapshot.personalHoldings ?? {},
+      snapshot.personalHoldingAccountMap,
+      (Array.isArray(snapshot.personalAccountSleeves) && snapshot.personalAccountSleeves.length > 0
+        ? snapshot.personalAccountSleeves
+        : createDefaultPersonalAccountSleeves())[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id
+    ),
+    personalShortHoldingAccountMap: normalizePositionAccountMap(
+      snapshot.personalShortHoldings ?? {},
+      snapshot.personalShortHoldingAccountMap,
+      (Array.isArray(snapshot.personalAccountSleeves) && snapshot.personalAccountSleeves.length > 0
+        ? snapshot.personalAccountSleeves
+        : createDefaultPersonalAccountSleeves())[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id
+    ),
     personalMarginDebt: snapshot.personalMarginDebt ?? 0,
     personalMarginCall: false,
     clients: sanitizeClients(snapshot.clients, hydratedTickers),
@@ -1895,6 +1998,22 @@ function buildSnapshot(state: GameState): PersistedGameSnapshot {
   };
 }
 
+function buildPersistentTrainingState(state: Pick<GameState,
+  "trainees" |
+  "activeTraineeId" |
+  "trainingAssignments" |
+  "trainingReports" |
+  "lastRecordedSessionKey"
+>) {
+  return {
+    trainees: state.trainees,
+    activeTraineeId: state.activeTraineeId,
+    trainingAssignments: state.trainingAssignments,
+    trainingReports: state.trainingReports,
+    lastRecordedSessionKey: state.lastRecordedSessionKey
+  };
+}
+
 function buildTrainingSessionReport(
   state: GameState,
   moduleReport: {
@@ -2045,10 +2164,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       }
 
       const currentSnapshot = buildSnapshot(currentState);
+      const persistentTrainingState = buildPersistentTrainingState(currentState);
       const storedTargetSnapshot = resolveDifficultySessionSnapshot(currentState.difficultySessions[difficulty]);
       const targetState = storedTargetSnapshot
         ? {
             ...storedTargetSnapshot,
+            ...persistentTrainingState,
             activeDifficulty: difficulty,
             questionBankStatus: "idle" as QuestionBankStatus,
             questionBankWarmStatus: "idle" as QuestionBankWarmStatus,
@@ -2065,7 +2186,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             activeDocumentationPrompt: null,
             activeBehaviorEvent: null
           }
-        : buildFreshDifficultyState(difficulty, currentState.tickers, currentState.histories, currentState.currentEvent);
+        : {
+            ...buildFreshDifficultyState(difficulty, currentState.tickers, currentState.histories, currentState.currentEvent),
+            ...persistentTrainingState
+          };
 
       set((state) => ({
         ...state,
@@ -2090,6 +2214,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
     togglePause: () => commit((state) => ({ isPaused: !state.isPaused })),
     resetSession: () => {
       const state = get();
+      const persistentTrainingState = buildPersistentTrainingState(state);
       const freshState = buildFreshDifficultyState(
         state.activeDifficulty,
         state.tickers,
@@ -2100,10 +2225,11 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       set({
         ...state,
         ...freshState,
+        ...persistentTrainingState,
         difficultySessions: {
           ...state.difficultySessions,
           [state.activeDifficulty]: {
-            ...buildSnapshot({ ...state, ...freshState } as GameState),
+            ...buildSnapshot({ ...state, ...freshState, ...persistentTrainingState } as GameState),
             activeDifficulty: state.activeDifficulty
           }
         }
@@ -3228,29 +3354,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         let nextDebt = state.personalMarginDebt;
         let detail = "";
 
-        const existingLongAccountId = state.personalHoldingAccountMap[ticker];
-        if (direction === "buy" && existingLongAccountId && existingLongAccountId !== accountId) {
-          commit({
-            tradeFeedback: buildTradeFeedback(
-              "Account sleeve mismatch",
-              `${ticker} already sits in ${state.personalAccountSleeves.find((sleeve) => sleeve.id === existingLongAccountId)?.label ?? "another account sleeve"}. Use that sleeve or open a transfer workflow later before duplicating it elsewhere.`,
-              "warning"
-            )
-          });
-          return;
-        }
-
-        const currentLong = nextHoldings[ticker];
-        const currentShort = nextShortHoldings[ticker];
+        const currentLongKey = findPositionKeyForSleeve(nextHoldings, nextHoldingAccountMap, ticker, accountId);
+        const currentShortKey = findPositionKeyForSleeve(nextShortHoldings, nextShortHoldingAccountMap, ticker, accountId);
+        const currentLong = currentLongKey ? nextHoldings[currentLongKey] : undefined;
+        const currentShort = currentShortKey ? nextShortHoldings[currentShortKey] : undefined;
 
         if (direction === "buy") {
-          const existingShortAccountId = state.personalShortHoldingAccountMap[ticker];
-          if (currentShort && existingShortAccountId && existingShortAccountId !== accountId) {
-            commit({
-              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} short exposure lives in a different player sleeve. Cover it in that sleeve first.`, "warning")
-            });
-            return;
-          }
           const coverShares = Math.min(quantity, currentShort?.shares ?? 0);
           if (coverShares > 0) {
             const coverCost = coverShares * asset.price;
@@ -3270,10 +3379,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             }
             const remainingShort = (currentShort?.shares ?? 0) - coverShares;
             if (remainingShort <= 0) {
-              delete nextShortHoldings[ticker];
-              delete nextShortHoldingAccountMap[ticker];
+              if (currentShortKey) {
+                delete nextShortHoldings[currentShortKey];
+                delete nextShortHoldingAccountMap[currentShortKey];
+              }
             } else {
-              nextShortHoldings[ticker] = { ...currentShort!, shares: remainingShort };
+              if (currentShortKey) {
+                nextShortHoldings[currentShortKey] = { ...currentShort!, shares: remainingShort };
+              }
             }
             detail = `Covered ${coverShares} ${ticker}`;
           }
@@ -3302,31 +3415,18 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             if (buyCost > sleeveCashUsed) {
               nextDebt += buyCost - sleeveCashUsed;
             }
-            const previousShares = nextHoldings[ticker]?.shares ?? 0;
-            const previousCost = nextHoldings[ticker]?.averageCost ?? asset.price;
-            nextHoldings[ticker] = {
+            const previousShares = currentLong?.shares ?? 0;
+            const previousCost = currentLong?.averageCost ?? asset.price;
+            const holdingKey = currentLongKey ?? createPositionKey(nextHoldings, ticker, accountId);
+            nextHoldings[holdingKey] = {
               ticker,
               shares: previousShares + buyShares,
               averageCost: ((previousShares * previousCost) + buyCost) / Math.max(previousShares + buyShares, 1)
             };
-            nextHoldingAccountMap[ticker] = accountId;
+            nextHoldingAccountMap[holdingKey] = accountId;
             detail = detail ? `${detail} and bought ${buyShares} long` : `Bought ${buyShares} ${ticker}`;
           }
         } else {
-          const existingLongAccount = state.personalHoldingAccountMap[ticker];
-          if (currentLong && existingLongAccount && existingLongAccount !== accountId) {
-            commit({
-              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} long exposure lives in a different player sleeve. Sell it from that sleeve instead.`, "warning")
-            });
-            return;
-          }
-          const existingShortAccount = state.personalShortHoldingAccountMap[ticker];
-          if (existingShortAccount && existingShortAccount !== accountId) {
-            commit({
-              tradeFeedback: buildTradeFeedback("Account sleeve mismatch", `${ticker} short exposure lives in a different player sleeve. Use that sleeve for the next trade.`, "warning")
-            });
-            return;
-          }
           const sellableLongShares = Math.min(quantity, currentLong?.shares ?? 0);
           if (sellableLongShares > 0) {
             const proceeds = sellableLongShares * asset.price;
@@ -3337,10 +3437,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             nextSleeveCash += netCashCredit;
             const remainingLong = (currentLong?.shares ?? 0) - sellableLongShares;
             if (remainingLong <= 0) {
-              delete nextHoldings[ticker];
-              delete nextHoldingAccountMap[ticker];
+              if (currentLongKey) {
+                delete nextHoldings[currentLongKey];
+                delete nextHoldingAccountMap[currentLongKey];
+              }
             } else {
-              nextHoldings[ticker] = { ...currentLong!, shares: remainingLong };
+              if (currentLongKey) {
+                nextHoldings[currentLongKey] = { ...currentLong!, shares: remainingLong };
+              }
             }
             detail = `Sold ${sellableLongShares} ${ticker}`;
           }
@@ -3361,14 +3465,15 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
               });
               return;
             }
-            const previousShares = nextShortHoldings[ticker]?.shares ?? 0;
-            const previousCost = nextShortHoldings[ticker]?.averageCost ?? asset.price;
-            nextShortHoldings[ticker] = {
+            const previousShares = currentShort?.shares ?? 0;
+            const previousCost = currentShort?.averageCost ?? asset.price;
+            const shortHoldingKey = currentShortKey ?? createPositionKey(nextShortHoldings, ticker, accountId);
+            nextShortHoldings[shortHoldingKey] = {
               ticker,
               shares: previousShares + shortShares,
               averageCost: ((previousShares * previousCost) + shortValue) / Math.max(previousShares + shortShares, 1)
             };
-            nextShortHoldingAccountMap[ticker] = accountId;
+            nextShortHoldingAccountMap[shortHoldingKey] = accountId;
             nextCash += shortValue;
             nextSleeveCash += shortValue;
             detail = detail ? `${detail} and sold short ${shortShares}` : `Sold short ${shortShares} ${ticker}`;
@@ -3405,18 +3510,6 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         return;
       }
 
-      const existingLongAccountId = client.holdingAccountMap[ticker];
-      if (direction === "buy" && existingLongAccountId && existingLongAccountId !== accountId) {
-        commit({
-          tradeFeedback: buildTradeFeedback(
-            "Account sleeve mismatch",
-            `${ticker} already sits in ${client.accountSleeves.find((sleeve) => sleeve.id === existingLongAccountId)?.label ?? "another account sleeve"}. Use that sleeve or add a transfer/rollover workflow before duplicating it elsewhere.`,
-            "warning"
-          )
-        });
-        return;
-      }
-
       const totalCost = asset.price * quantity;
       const nextClients = state.clients.map((entry) => {
         if (entry.id !== clientId) {
@@ -3435,19 +3528,13 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
         let nextCash = nextClient.cash;
         let nextSleeveCash = getSleeveCashBalance(nextClient, accountId);
         let nextDebt = nextClient.marginDebt ?? 0;
-        const currentLong = nextClient.holdings[ticker];
-        const currentShort = nextClient.shortHoldings[ticker];
+        const currentLongKey = findPositionKeyForSleeve(nextClient.holdings, nextClient.holdingAccountMap, ticker, accountId);
+        const currentShortKey = findPositionKeyForSleeve(nextClient.shortHoldings, nextClient.shortHoldingAccountMap, ticker, accountId);
+        const currentLong = currentLongKey ? nextClient.holdings[currentLongKey] : undefined;
+        const currentShort = currentShortKey ? nextClient.shortHoldings[currentShortKey] : undefined;
         let shortSale = false;
 
         if (direction === "buy") {
-          const existingLongAccount = nextClient.holdingAccountMap[ticker];
-          if (existingLongAccount && existingLongAccount !== accountId) {
-            return entry;
-          }
-          const existingShortAccount = nextClient.shortHoldingAccountMap[ticker];
-          if (currentShort && existingShortAccount && existingShortAccount !== accountId) {
-            return entry;
-          }
           const coverShares = Math.min(quantity, currentShort?.shares ?? 0);
           if (coverShares > 0) {
             const coverCost = coverShares * asset.price;
@@ -3462,10 +3549,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             }
             const remainingShort = (currentShort?.shares ?? 0) - coverShares;
             if (remainingShort <= 0) {
-              delete nextClient.shortHoldings[ticker];
-              delete nextClient.shortHoldingAccountMap[ticker];
+              if (currentShortKey) {
+                delete nextClient.shortHoldings[currentShortKey];
+                delete nextClient.shortHoldingAccountMap[currentShortKey];
+              }
             } else {
-              nextClient.shortHoldings[ticker] = { ...currentShort!, shares: remainingShort };
+              if (currentShortKey) {
+                nextClient.shortHoldings[currentShortKey] = { ...currentShort!, shares: remainingShort };
+              }
             }
           }
 
@@ -3487,24 +3578,17 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             if (buyCost > sleeveCashUsed) {
               nextDebt += buyCost - sleeveCashUsed;
             }
-            const previousShares = nextClient.holdings[ticker]?.shares ?? 0;
-            const previousCost = nextClient.holdings[ticker]?.averageCost ?? asset.price;
-            nextClient.holdings[ticker] = {
+            const previousShares = currentLong?.shares ?? 0;
+            const previousCost = currentLong?.averageCost ?? asset.price;
+            const holdingKey = currentLongKey ?? createPositionKey(nextClient.holdings, ticker, accountId);
+            nextClient.holdings[holdingKey] = {
               ticker,
               shares: previousShares + buyShares,
               averageCost: ((previousShares * previousCost) + buyCost) / Math.max(previousShares + buyShares, 1)
             };
-            nextClient.holdingAccountMap[ticker] = accountId;
+            nextClient.holdingAccountMap[holdingKey] = accountId;
           }
         } else {
-          const existingLongAccount = nextClient.holdingAccountMap[ticker];
-          if (currentLong && existingLongAccount && existingLongAccount !== accountId) {
-            return entry;
-          }
-          const existingShortAccount = nextClient.shortHoldingAccountMap[ticker];
-          if (existingShortAccount && existingShortAccount !== accountId) {
-            return entry;
-          }
           const sellableLongShares = Math.min(quantity, currentLong?.shares ?? 0);
           if (sellableLongShares > 0) {
             const proceeds = sellableLongShares * asset.price;
@@ -3515,10 +3599,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             nextSleeveCash += netCashCredit;
             const remainingLong = (currentLong?.shares ?? 0) - sellableLongShares;
             if (remainingLong <= 0) {
-              delete nextClient.holdings[ticker];
-              delete nextClient.holdingAccountMap[ticker];
+              if (currentLongKey) {
+                delete nextClient.holdings[currentLongKey];
+                delete nextClient.holdingAccountMap[currentLongKey];
+              }
             } else {
-              nextClient.holdings[ticker] = { ...currentLong!, shares: remainingLong };
+              if (currentLongKey) {
+                nextClient.holdings[currentLongKey] = { ...currentLong!, shares: remainingLong };
+              }
             }
           }
 
@@ -3532,14 +3620,15 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
             if (shortValue > availableExposure) {
               return entry;
             }
-            const previousShares = nextClient.shortHoldings[ticker]?.shares ?? 0;
-            const previousCost = nextClient.shortHoldings[ticker]?.averageCost ?? asset.price;
-            nextClient.shortHoldings[ticker] = {
+            const previousShares = currentShort?.shares ?? 0;
+            const previousCost = currentShort?.averageCost ?? asset.price;
+            const shortHoldingKey = currentShortKey ?? createPositionKey(nextClient.shortHoldings, ticker, accountId);
+            nextClient.shortHoldings[shortHoldingKey] = {
               ticker,
               shares: previousShares + shortShares,
               averageCost: ((previousShares * previousCost) + shortValue) / Math.max(previousShares + shortShares, 1)
             };
-            nextClient.shortHoldingAccountMap[ticker] = accountId;
+            nextClient.shortHoldingAccountMap[shortHoldingKey] = accountId;
             nextCash += shortValue;
             nextSleeveCash += shortValue;
             shortSale = true;
@@ -3570,13 +3659,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       });
 
       const updatedClient = nextClients.find((entry) => entry.id === clientId) ?? client;
+      const existingLongKeyInSelectedSleeve = findPositionKeyForSleeve(client.holdings, client.holdingAccountMap ?? {}, ticker, accountId);
       const effectiveDecision = withMarginDecisionAdjustment(
         evaluateTradeSuitability(client, asset, quantity, direction, state.tickers),
         client,
         asset,
         mode,
         state.activeDifficulty,
-        direction === "sell" && !(client.holdings[ticker]?.shares >= quantity)
+        direction === "sell" && !((existingLongKeyInSelectedSleeve ? client.holdings[existingLongKeyInSelectedSleeve]?.shares : 0) >= quantity)
       );
       const nextSecLevel = applyScrutinyLevel(state.secMeterLevel, effectiveDecision);
       const shouldTriggerAudit = nextSecLevel >= 100;
@@ -4037,9 +4127,17 @@ export const useGameStore = create<GameState>()(persist((set, get) => {
       Array.isArray(state.personalAccountSleeves) && state.personalAccountSleeves.length > 0
         ? state.personalAccountSleeves
         : createDefaultPersonalAccountSleeves();
-    state.personalHoldingAccountMap = state.personalHoldingAccountMap ?? {};
+    state.personalHoldingAccountMap = normalizePositionAccountMap(
+      state.personalHoldings ?? {},
+      state.personalHoldingAccountMap,
+      state.personalAccountSleeves[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id
+    );
     state.personalShortHoldings = state.personalShortHoldings ?? {};
-    state.personalShortHoldingAccountMap = state.personalShortHoldingAccountMap ?? {};
+    state.personalShortHoldingAccountMap = normalizePositionAccountMap(
+      state.personalShortHoldings ?? {},
+      state.personalShortHoldingAccountMap,
+      state.personalAccountSleeves[0]?.id ?? PLAYER_TAXABLE_SLEEVE.id
+    );
     state.personalSleeveCashBalances = normalizePersonalSleeveCashBalances(
       state.personalAccountSleeves,
       state.personalSleeveCashBalances,

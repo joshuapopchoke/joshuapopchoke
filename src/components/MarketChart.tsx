@@ -109,7 +109,7 @@ function buildPeriodSeries(
     category === "futures" ? 0.016 :
     category === "funds" ? 0.007 :
     0.011;
-  const normalizedBeta = Math.max(0.35, beta || 1);
+  const normalizedBeta = Math.max(0.05, Math.abs(beta || 1));
   const generated: number[] = [startPrice];
   let walker = startPrice;
 

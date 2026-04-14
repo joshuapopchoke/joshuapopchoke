@@ -26,9 +26,13 @@ interface EmployeeModuleWorkspaceProps {
   }) => void;
 }
 
-function ModuleBanner({ assignment, moduleScore, scoreCards }: EmployeeModuleWorkspaceProps) {
+interface ModuleBannerProps extends EmployeeModuleWorkspaceProps {
+  compact?: boolean;
+}
+
+function ModuleBanner({ assignment, moduleScore, scoreCards, compact = false }: ModuleBannerProps) {
   return (
-    <section className="panel module-banner">
+    <section className={compact ? "panel module-banner module-banner--compact" : "panel module-banner"}>
       <div className="panel-header">
         <div className="side-panel-heading">
           <h2>{assignment.module.title}</h2>
@@ -70,8 +74,8 @@ export function EmployeeModuleWorkspace(props: EmployeeModuleWorkspaceProps) {
       return (
         <div className="module-layout module-layout--three">
           <ClientRoster />
-          <div className="center-column">
-            <ModuleBanner {...props} />
+          <div className="center-column center-column--module center-column--suitability">
+            <ModuleBanner {...props} compact />
             <MarketChart />
             <OrderEntry />
           </div>
@@ -92,8 +96,8 @@ export function EmployeeModuleWorkspace(props: EmployeeModuleWorkspaceProps) {
       return (
         <div className="module-layout module-layout--three">
           <ClientRoster />
-          <div className="center-column">
-            <ModuleBanner {...props} />
+          <div className="center-column center-column--module center-column--retirement">
+            <ModuleBanner {...props} compact />
             <OrderEntry />
           </div>
           <section className="panel side-shell">
@@ -121,8 +125,8 @@ export function EmployeeModuleWorkspace(props: EmployeeModuleWorkspaceProps) {
       return (
         <div className="module-layout module-layout--three">
           <ClientRoster mode="mortgage" showPlayerAccount={false} />
-          <div className="center-column">
-            <ModuleBanner {...props} />
+          <div className="center-column center-column--module center-column--mortgage">
+            <ModuleBanner {...props} compact />
             <MortgageDebtPlanningPanel assignment={assignment} />
           </div>
           <MortgageContextPanel />
@@ -132,8 +136,8 @@ export function EmployeeModuleWorkspace(props: EmployeeModuleWorkspaceProps) {
       return (
         <div className="module-layout module-layout--three">
           <ClientRoster mode="lending" showPlayerAccount={false} />
-          <div className="center-column">
-            <ModuleBanner {...props} />
+          <div className="center-column center-column--module center-column--bank">
+            <ModuleBanner {...props} compact />
             <BankLendingPanel assignment={assignment} />
           </div>
           <LendingContextPanel />

@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { evaluateTradeSuitability } from "../engine/complianceEngine";
+import { useEffect, useMemo, useState } from "react";
 import { useGameStore } from "../store/gameStore";
 import type { TradeFundingMode } from "../types/gameState";
 
@@ -24,38 +23,39 @@ export function OrderEntry() {
   const playerTradeStatus = useGameStore((state) => state.playerTradeStatus);
   const playerSuspensionRounds = useGameStore((state) => state.playerSuspensionRounds);
   const tradeFeedback = useGameStore((state) => state.tradeFeedback);
+  const [orderTicker, setOrderTicker] = useState(selectedTicker);
   const [direction, setDirection] = useState<"buy" | "sell">("buy");
   const [quantity, setQuantity] = useState(10);
   const [accountTarget, setAccountTarget] = useState("player::player-taxable");
   const [mode, setMode] = useState<TradeFundingMode>("cash");
   const marginEnabled = activeDifficulty === "advisor" || activeDifficulty === "senior";
   const shortEnabled = activeDifficulty === "senior";
-  const selectedAsset = tickers[selectedTicker];
+  const selectedAsset = tickers[orderTicker];
   const selectedIsMarginable = selectedAsset ? selectedAsset.category === "stocks" || selectedAsset.category === "funds" : false;
   const [selectedClientId] = accountTarget === "player" ? [null] : accountTarget.split("::");
   const selectedClient = selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
-  const sleeveTotals = selectedClient
-    ? Object.fromEntries(
-        selectedClient.accountSleeves.map((sleeve) => {
-          const sleeveCash = selectedClient.sleeveCashBalances[sleeve.id] ?? 0;
-          const sleeveLongValue = Object.values(selectedClient.holdings)
-            .filter((holding) => (selectedClient.holdingAccountMap[holding.ticker] ?? selectedClient.accountSleeves[0]?.id) === sleeve.id)
-            .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
-          const sleeveShortValue = Object.values(selectedClient.shortHoldings ?? {})
-            .filter((holding) => (selectedClient.shortHoldingAccountMap[holding.ticker] ?? selectedClient.accountSleeves[0]?.id) === sleeve.id)
-            .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+  const sleeveTotalsByClient = useMemo(
+    () =>
+      Object.fromEntries(
+        clients.map((client) => [
+          client.id,
+          Object.fromEntries(
+            client.accountSleeves.map((sleeve) => {
+              const sleeveCash = client.sleeveCashBalances[sleeve.id] ?? 0;
+              const sleeveLongValue = Object.entries(client.holdings)
+                .filter(([holdingKey]) => (client.holdingAccountMap[holdingKey] ?? client.accountSleeves[0]?.id) === sleeve.id)
+                .reduce((sum, [, holding]) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+              const sleeveShortValue = Object.entries(client.shortHoldings ?? {})
+                .filter(([holdingKey]) => (client.shortHoldingAccountMap[holdingKey] ?? client.accountSleeves[0]?.id) === sleeve.id)
+                .reduce((sum, [, holding]) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
 
-          return [sleeve.id, sleeveCash + sleeveLongValue - sleeveShortValue];
-        })
-      )
-    : {};
-  const policyBucketBlocked =
-    Boolean(selectedClient && selectedAsset && (selectedClient.investmentPolicy.prohibitedBuckets ?? []).includes(selectedAsset.category));
-  const suitabilityPreview =
-    selectedClient && selectedAsset
-      ? evaluateTradeSuitability(selectedClient, selectedAsset, quantity, direction, tickers)
-      : null;
-
+              return [sleeve.id, sleeveCash + sleeveLongValue - sleeveShortValue];
+            })
+          )
+        ])
+      ) as Record<string, Record<string, number>>,
+    [clients, tickers]
+  );
   useEffect(() => {
     if (!marginEnabled && mode !== "cash") {
       setMode("cash");
@@ -68,6 +68,10 @@ export function OrderEntry() {
     }
   }, [mode, selectedIsMarginable]);
 
+  useEffect(() => {
+    setOrderTicker(selectedTicker);
+  }, [selectedTicker]);
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -76,7 +80,7 @@ export function OrderEntry() {
       <div className="order-grid">
         <label>
           Ticker
-          <select value={selectedTicker} onChange={(event) => useGameStore.getState().selectTicker(event.target.value)}>
+          <select value={orderTicker} onChange={(event) => setOrderTicker(event.target.value)}>
             {Object.entries(CATEGORY_LABELS).map(([category, label]) => (
               <optgroup key={category} label={label}>
                 {Object.values(tickers)
@@ -122,7 +126,7 @@ export function OrderEntry() {
               <optgroup key={client.id} label={client.name}>
                 {client.accountSleeves.map((sleeve) => (
                   <option key={sleeve.id} value={`${client.id}::${sleeve.id}`}>
-                    {sleeve.label} - {(sleeveTotals[sleeve.id] ?? 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
+                    {sleeve.label} - {(sleeveTotalsByClient[client.id]?.[sleeve.id] ?? 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
                   </option>
                 ))}
               </optgroup>
@@ -137,38 +141,6 @@ export function OrderEntry() {
             : shortEnabled
             ? "Pro margin is live: leveraged longs and short selling are enabled on marginable stocks and funds."
             : "Hard margin is live: leveraged long positions are enabled on marginable stocks and funds."}
-        </div>
-      ) : null}
-      {selectedClient && selectedAsset ? (
-        <div className="order-banner">
-          {policyBucketBlocked
-            ? `IPS warning: ${selectedAsset.name} falls into a prohibited ${selectedAsset.category} bucket for ${selectedClient.name}. ${selectedClient.investmentPolicy.nextReviewFocus}`
-            : `Policy preview: ${selectedClient.name} targets ${selectedClient.investmentPolicy.equityRangeLabel ?? "a balanced sleeve"} and review focus is ${selectedClient.investmentPolicy.nextReviewFocus}`}
-        </div>
-      ) : null}
-      {selectedClient && selectedAsset && suitabilityPreview && direction === "buy" ? (
-        <div className={`trade-feedback ${suitabilityPreview.suitable ? "neutral" : "warning"}`}>
-          <strong>{suitabilityPreview.suitable ? "Suitability preview: in lane" : "Suitability preview: review needed"}</strong>
-          <span>
-            {suitabilityPreview.suitable
-              ? `${selectedAsset.name} currently fits ${selectedClient.name}'s ${selectedClient.riskProfile.toLowerCase()} mandate if it is sized inside the ${selectedClient.investmentPolicy.equityRangeLabel ?? "current IPS lane"}.`
-              : suitabilityPreview.reasons[0]}
-          </span>
-          <ul className="trade-feedback-list">
-            {suitabilityPreview.suitable ? (
-              <>
-                <li>{selectedClient.name} target lane: {selectedClient.investmentPolicy.equityRangeLabel ?? "Policy-led allocation range"}</li>
-                <li>
-                  Selected asset: {selectedAsset.name} | {selectedAsset.category === "stocks" || selectedAsset.category === "funds"
-                    ? `Beta ${(selectedAsset.beta ?? 0).toFixed(2)}`
-                    : selectedAsset.category}
-                </li>
-                <li>Use the selected sleeve to keep tax treatment and beneficiary handling aligned with the recommendation.</li>
-              </>
-            ) : (
-              suitabilityPreview.reasons.slice(0, 3).map((reason) => <li key={reason}>{reason}</li>)
-            )}
-          </ul>
         </div>
       ) : null}
       {playerTradeStatus === "suspended" ? (
@@ -187,7 +159,7 @@ export function OrderEntry() {
           ) : null}
         </div>
       ) : null}
-      <button className="primary-btn" onClick={() => submitOrder({ ticker: selectedTicker, direction, quantity, clientId: selectedClientId ?? "player", accountId: accountTarget.split("::")[1] ?? "player-taxable", mode })}>
+      <button className="primary-btn" onClick={() => submitOrder({ ticker: orderTicker, direction, quantity, clientId: selectedClientId ?? "player", accountId: accountTarget.split("::")[1] ?? "player-taxable", mode })}>
         Submit Order
       </button>
     </section>

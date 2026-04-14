@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildClientTaxGuidance } from "../engine/taxEngine";
+import { inferInstrumentBeta } from "../engine/betaEngine";
 import { useGameStore } from "../store/gameStore";
 
 const CATEGORY_DESCRIPTIONS = {
@@ -179,9 +180,16 @@ function buildResearchInsights(symbol: string, category: string) {
   const liveTicker = useGameStore.getState().tickers[symbol];
 
   if (category === "stocks") {
-    return {
+      return {
       marketCap: `$${Math.round(40 + seededNumber(symbol, 10) * 1900)}B`,
-      beta: (liveTicker?.beta ?? (0.7 + seededNumber(symbol, 11) * 1.4)).toFixed(2),
+      beta: inferInstrumentBeta(liveTicker ?? {
+        symbol,
+        name: symbol,
+        price: 0,
+        prevPrice: 0,
+        change: 0,
+        category: "stocks"
+      }).toFixed(2),
       range52Week: `$${(60 + seededNumber(symbol, 12) * 120).toFixed(2)} - $${(150 + seededNumber(symbol, 13) * 180).toFixed(2)}`,
       analystSentiment: ["Overweight", "Neutral", "Market Perform", "Outperform"][Math.floor(seededNumber(symbol, 14) * 4)]
     };
@@ -191,7 +199,14 @@ function buildResearchInsights(symbol: string, category: string) {
     return {
       aum: `$${Math.round(5 + seededNumber(symbol, 10) * 650)}B`,
       styleBox: ["Large Blend", "Large Growth", "Large Value", "Balanced", "Global Allocation"][Math.floor(seededNumber(symbol, 11) * 5)],
-      beta: (liveTicker?.beta ?? 0.9).toFixed(2),
+      beta: inferInstrumentBeta(liveTicker ?? {
+        symbol,
+        name: symbol,
+        price: 0,
+        prevPrice: 0,
+        change: 0,
+        category: "funds"
+      }).toFixed(2),
       trackingError: `${(0.05 + seededNumber(symbol, 12) * 1.3).toFixed(2)}%`,
       standardDeviation: `${(6 + seededNumber(symbol, 13) * 18).toFixed(2)}%`
     };

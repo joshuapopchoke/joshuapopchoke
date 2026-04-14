@@ -53,8 +53,8 @@ export function buildTaxManagementSnapshot(
   client: ClientAccount,
   tickers: Record<string, Ticker>
 ): TaxManagementSnapshot {
-  const taxableRows = Object.values(client.holdings).reduce<TaxLotInsightRow[]>((rows, holding) => {
-    const sleeveId = client.holdingAccountMap[holding.ticker] ?? client.accountSleeves[0]?.id ?? "";
+  const taxableRows = Object.entries(client.holdings).reduce<TaxLotInsightRow[]>((rows, [holdingKey, holding]) => {
+    const sleeveId = client.holdingAccountMap[holdingKey] ?? client.accountSleeves[0]?.id ?? "";
     if (!isTaxableSleeve(client, sleeveId)) {
       return rows;
     }

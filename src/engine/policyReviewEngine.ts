@@ -18,6 +18,10 @@ function reviewCadenceCycles(cadence: string) {
   return 40;
 }
 
+function isGoldFallbackTicker(ticker: Ticker) {
+  return ticker.symbol === "GLD" || ticker.symbol === "GC" || ticker.name.toLowerCase().includes("gold");
+}
+
 export function buildPolicyReviewSnapshot(
   client: ClientAccount,
   tickers: Record<string, Ticker>,
@@ -30,7 +34,13 @@ export function buildPolicyReviewSnapshot(
   const prohibitedExposure = Object.values(client.holdings)
     .map((holding) => tickers[holding.ticker])
     .filter((ticker): ticker is Ticker => Boolean(ticker))
-    .filter((ticker) => prohibitedBuckets.has(ticker.category) || (ticker.sector && client.watchouts.includes(ticker.sector)))
+    .filter((ticker) => {
+      if (ticker.category === "commodities" && isGoldFallbackTicker(ticker)) {
+        return false;
+      }
+
+      return prohibitedBuckets.has(ticker.category) || (ticker.sector && client.watchouts.includes(ticker.sector));
+    })
     .map((ticker) => ticker.name)
     .slice(0, 3);
 

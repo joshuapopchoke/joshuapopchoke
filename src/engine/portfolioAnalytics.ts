@@ -1,33 +1,13 @@
 import type { ClientHolding, RiskProfile } from "../types/client";
 import type { Ticker } from "../types/market";
-
-function categoryBeta(category: Ticker["category"]) {
-  switch (category) {
-    case "stocks":
-      return 1;
-    case "funds":
-      return 0.92;
-    case "fixedIncome":
-      return 0.18;
-    case "bonds":
-      return 0.3;
-    case "forex":
-      return 0.55;
-    case "commodities":
-      return 0.72;
-    case "futures":
-      return 1.15;
-    default:
-      return 1;
-  }
-}
+import { inferInstrumentBeta } from "./betaEngine";
 
 export function getInstrumentBeta(ticker: Ticker | undefined) {
   if (!ticker) {
     return 0;
   }
 
-  return ticker.beta ?? categoryBeta(ticker.category);
+  return inferInstrumentBeta(ticker);
 }
 
 export function calculatePortfolioBeta(

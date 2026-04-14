@@ -129,9 +129,9 @@ export function PortfolioPanel() {
   }, [activeClient, tickers]);
   const playerSleeveRows = useMemo(() => {
     return personalAccountSleeves.map((sleeve) => {
-      const sleeveRows = Object.values(personalHoldings)
-        .filter((holding) => (personalHoldingAccountMap[holding.ticker] ?? personalAccountSleeves[0]?.id) === sleeve.id)
-        .map((holding) => {
+      const sleeveRows = Object.entries(personalHoldings)
+        .filter(([holdingKey]) => (personalHoldingAccountMap[holdingKey] ?? personalAccountSleeves[0]?.id) === sleeve.id)
+        .map(([holdingKey, holding]) => {
           const ticker = tickers[holding.ticker];
           const currentPrice = ticker?.price ?? 0;
           const marketValue = currentPrice * holding.shares;
@@ -139,7 +139,7 @@ export function PortfolioPanel() {
           const unrealized = marketValue - costBasis;
 
           return {
-            key: `player-${sleeve.id}-${holding.ticker}`,
+            key: `player-${sleeve.id}-${holdingKey}`,
             ticker: holding.ticker,
             name: ticker?.name ?? holding.ticker,
             shares: holding.shares,
@@ -155,9 +155,9 @@ export function PortfolioPanel() {
         });
 
       const sleeveMarketValue = sleeveRows.reduce((sum, row) => sum + row.marketValue, 0);
-      const sleeveShortValue = Object.values(personalShortHoldings)
-        .filter((holding) => (personalShortHoldingAccountMap[holding.ticker] ?? personalAccountSleeves[0]?.id) === sleeve.id)
-        .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+      const sleeveShortValue = Object.entries(personalShortHoldings)
+        .filter(([holdingKey]) => (personalShortHoldingAccountMap[holdingKey] ?? personalAccountSleeves[0]?.id) === sleeve.id)
+        .reduce((sum, [, holding]) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
       const sleeveUnrealized = sleeveRows.reduce((sum, row) => sum + row.unrealized, 0);
       const sleeveCash = personalSleeveCashBalances[sleeve.id] ?? 0;
       const sleeveTotal = sleeveCash + sleeveMarketValue - sleeveShortValue;
@@ -179,9 +179,9 @@ export function PortfolioPanel() {
     }
 
     return activeClient.accountSleeves.map((sleeve) => {
-      const sleeveRows = Object.values(activeClient.holdings)
-        .filter((holding) => (activeClient.holdingAccountMap[holding.ticker] ?? activeClient.accountSleeves[0]?.id) === sleeve.id)
-        .map((holding) => {
+      const sleeveRows = Object.entries(activeClient.holdings)
+        .filter(([holdingKey]) => (activeClient.holdingAccountMap[holdingKey] ?? activeClient.accountSleeves[0]?.id) === sleeve.id)
+        .map(([holdingKey, holding]) => {
           const ticker = tickers[holding.ticker];
           const currentPrice = ticker?.price ?? 0;
           const marketValue = currentPrice * holding.shares;
@@ -189,7 +189,7 @@ export function PortfolioPanel() {
           const unrealized = marketValue - costBasis;
 
           return {
-            key: `${activeClient.id}-${sleeve.id}-${holding.ticker}`,
+            key: `${activeClient.id}-${sleeve.id}-${holdingKey}`,
             ticker: holding.ticker,
             name: ticker?.name ?? holding.ticker,
             shares: holding.shares,
@@ -205,9 +205,9 @@ export function PortfolioPanel() {
         });
 
       const sleeveMarketValue = sleeveRows.reduce((sum, row) => sum + row.marketValue, 0);
-      const sleeveShortValue = Object.values(activeClient.shortHoldings ?? {})
-        .filter((holding) => (activeClient.shortHoldingAccountMap[holding.ticker] ?? activeClient.accountSleeves[0]?.id) === sleeve.id)
-        .reduce((sum, holding) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
+      const sleeveShortValue = Object.entries(activeClient.shortHoldings ?? {})
+        .filter(([holdingKey]) => (activeClient.shortHoldingAccountMap[holdingKey] ?? activeClient.accountSleeves[0]?.id) === sleeve.id)
+        .reduce((sum, [, holding]) => sum + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
       const sleeveUnrealized = sleeveRows.reduce((sum, row) => sum + row.unrealized, 0);
       const sleeveCash = activeClient.sleeveCashBalances[sleeve.id] ?? 0;
       const sleeveTotal = sleeveCash + sleeveMarketValue - sleeveShortValue;

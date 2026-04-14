@@ -566,6 +566,23 @@ h3 { font-size: 0.78rem; }
   gap: clamp(8px, 0.6vw, 12px);
 }
 
+.center-column--module {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.center-column--suitability {
+  grid-template-rows: auto minmax(210px, 0.58fr) auto;
+}
+
+.center-column--retirement {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.center-column--mortgage,
+.center-column--bank {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .panel { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .panel-header {
   padding: 8px 10px;
@@ -1209,6 +1226,34 @@ textarea.documentation-textarea {
 }
 .module-banner {
   padding-bottom: 10px;
+}
+
+.module-banner--compact {
+  padding-bottom: 0;
+}
+
+.module-banner--compact .panel-header {
+  padding: 6px 10px 4px;
+}
+
+.module-banner--compact .study-summary-grid {
+  padding: 8px 10px 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.module-banner--compact .study-summary-card {
+  padding: 6px 8px;
+  min-height: 0;
+}
+
+.module-banner--compact .study-summary-card span,
+.module-banner--compact .study-summary-card small {
+  font-size: 0.58rem;
+}
+
+.module-banner--compact .study-summary-card strong {
+  font-size: 0.68rem;
 }
 .module-lock-card {
   width: min(820px, 100%);

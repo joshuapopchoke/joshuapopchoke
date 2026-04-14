@@ -1,4 +1,5 @@
 import type { FinancialProfile, MarketEvent, Ticker } from "../types/market";
+import { inferInstrumentBeta } from "./betaEngine";
 import { refreshCallableBondTerms } from "./rateEngine";
 
 const STOCKS: Omit<Ticker, "prevPrice" | "change">[] = [
@@ -188,42 +189,6 @@ const MARKET_EVENTS: MarketEvent[] = [
   }
 ];
 
-function inferBeta(ticker: Omit<Ticker, "prevPrice" | "change">) {
-  if (ticker.category === "stocks") {
-    if (ticker.sector === "Technology") return 1.26;
-    if (ticker.sector === "Financials") return 1.08;
-    if (ticker.sector === "Healthcare") return 0.92;
-    if (ticker.sector === "Energy") return 1.18;
-    if (ticker.sector === "Consumer") return 0.86;
-    if (ticker.sector === "Industrials") return 1.04;
-    if (ticker.sector === "Real Estate") return 0.9;
-    if (ticker.sector === "Utilities") return 0.62;
-    return 1;
-  }
-
-  if (ticker.category === "funds") {
-    if (ticker.sector === "Index Funds") return 1;
-    if (ticker.sector === "Small Cap Funds") return 1.18;
-    if (ticker.sector === "Mid Cap Funds") return 1.07;
-    if (ticker.sector === "Large Cap Funds") return 0.96;
-    if (ticker.sector === "Mutual Funds") return 0.88;
-    if (ticker.sector === "Active Funds") return 1.04;
-    if (ticker.sector === "Sector Funds") return 1.16;
-    if (ticker.sector === "Hybrid Funds") return 0.68;
-    if (ticker.sector === "International Funds") return 0.94;
-    if (ticker.sector === "Target Date Funds") return 0.71;
-    if (ticker.sector === "Hedge Funds") return 0.82;
-    return 0.9;
-  }
-
-  if (ticker.category === "fixedIncome") return 0.18;
-  if (ticker.category === "bonds") return 0.32;
-  if (ticker.category === "forex") return 0.55;
-  if (ticker.category === "commodities") return 0.74;
-  if (ticker.category === "futures") return 1.15;
-  return 1;
-}
-
 function isLastTradingDaysOfYear(date: Date) {
   if (date.getMonth() !== 11) {
     return false;
@@ -273,7 +238,7 @@ export class MarketEngine {
         ticker.symbol,
         {
           ...ticker,
-          beta: ticker.beta ?? inferBeta(ticker),
+          beta: inferInstrumentBeta(ticker as Ticker),
           prevPrice: ticker.price,
           change: 0
         }

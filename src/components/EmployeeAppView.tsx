@@ -351,7 +351,7 @@ export function EmployeeAppView({ onLogout }: EmployeeAppViewProps) {
         extraControls={(
           <>
             <button type="button" className="control-btn" onClick={() => setLaunchedAssignmentId(null)}>
-              Modules
+              Main Menu
             </button>
             <button type="button" className="control-btn" onClick={onLogout}>
               Logout

@@ -107,6 +107,10 @@ export interface InvestmentPolicyProfile {
   prohibitedBuckets?: string[];
   maxSinglePositionPct?: number;
   equityRangeLabel?: string;
+  targetEquityMinPct?: number;
+  targetEquityMaxPct?: number;
+  maxNonEquityPct?: number;
+  speculativeBetaThreshold?: number;
   reviewCadence: string;
   nextReviewFocus: string;
   spendingRule?: string;

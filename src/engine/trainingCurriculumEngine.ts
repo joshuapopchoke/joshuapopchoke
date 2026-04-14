@@ -59,6 +59,9 @@ function effectiveModuleDifficulty(
   return assignment.assignedDifficulty ?? module.requiredDifficulty;
 }
 
+function reportBelongsToModule(module: TrainingModuleDefinition, report: TrainingSessionReport) {
+  return report.moduleId === module.id;
+}
 
 function roundScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -301,7 +304,7 @@ function computeCompletionPercent(module: TrainingModuleDefinition, report: Trai
 }
 
 function reportMatchesModule(module: TrainingModuleDefinition, report: TrainingSessionReport) {
-  if (report.moduleId && report.moduleId !== module.id) {
+  if (!reportBelongsToModule(module, report)) {
     return false;
   }
 
@@ -323,11 +326,15 @@ export function buildAssignmentSnapshots(assignments: TrainingAssignment[], repo
     const traineeReports = reports
       .filter((report) => report.traineeId === assignment.traineeId)
       .sort((left, right) => right.endedAt - left.endedAt);
+    const moduleReports = traineeReports.filter((report) => reportBelongsToModule(module, report));
     const moduleWithAssignedDifficulty: TrainingModuleDefinition = {
       ...module,
       requiredDifficulty: effectiveModuleDifficulty(module, assignment)
     };
-    const bestMatchingReport = traineeReports.find((report) => reportMatchesModule(moduleWithAssignedDifficulty, report)) ?? traineeReports[0] ?? null;
+    const bestMatchingReport =
+      moduleReports.find((report) => reportMatchesModule(moduleWithAssignedDifficulty, report))
+      ?? moduleReports[0]
+      ?? null;
 
     return {
       assignmentId: assignment.id,

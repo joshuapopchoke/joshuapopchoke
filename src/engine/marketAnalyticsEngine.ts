@@ -1,5 +1,6 @@
 import type { ClientAccount, ClientHolding } from "../types/client";
 import type { Ticker } from "../types/market";
+import { inferInstrumentBeta } from "./betaEngine";
 
 export interface PortfolioAnalyticsSnapshot {
   weightedBeta: number;
@@ -66,7 +67,7 @@ export function buildPortfolioAnalyticsSnapshot(
 
     const value = valueOfHolding(holding, tickers);
     const weight = value / totalValue;
-    weightedBeta += (ticker.beta ?? 0.85) * weight;
+    weightedBeta += inferInstrumentBeta(ticker) * weight;
     categoryWeights[ticker.category] = (categoryWeights[ticker.category] ?? 0) + weight;
     const sectorKey = ticker.sector ?? categoryLabel(ticker.category);
     sectorWeights[sectorKey] = (sectorWeights[sectorKey] ?? 0) + weight;

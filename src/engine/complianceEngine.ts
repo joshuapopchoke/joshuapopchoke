@@ -1,5 +1,6 @@
 import type { ClientAccount } from "../types/client";
 import type { Ticker } from "../types/market";
+import { getAllocationExposure, getAllocationPolicy, getProjectedAllocationExposure, isEquityAllocationCategory } from "./allocationPolicyEngine";
 
 export interface ComplianceDecision {
   suitable: boolean;
@@ -7,13 +8,6 @@ export interface ComplianceDecision {
   scrutinyDelta: number;
   flags: Array<"suitability" | "risk-override" | "unsuitable-product" | "concentration">;
 }
-
-const RISK_LIMITS: Record<ClientAccount["riskProfile"], number> = {
-  Conservative: 0.3,
-  Moderate: 0.55,
-  "Moderate-Aggressive": 0.75,
-  Aggressive: 0.95
-};
 
 const CAPITAL_PRESERVATION_ACCOUNT_TYPES = new Set(["Retirement Income Account", "Institutional Endowment"]);
 const DEFENSIVE_FIT_HINT = "Better fit examples: diversified dividend funds, short-duration bond funds, high-quality large-cap dividend payers, or balanced funds.";
@@ -26,34 +20,24 @@ function betaText(ticker: Ticker) {
   return typeof ticker.beta === "number" ? `Beta ${ticker.beta.toFixed(2)}` : "Higher-volatility";
 }
 
-function isHighBetaTicker(ticker: Ticker) {
-  return (ticker.beta ?? 1) >= 1.5;
+function isHighBetaTicker(ticker: Ticker, threshold: number) {
+  return ticker.category === "stocks" && (ticker.beta ?? 1) >= threshold;
+}
+
+function isFixedIncomeSuitabilityCategory(ticker: Ticker) {
+  return ticker.category === "fixedIncome" || ticker.category === "bonds";
+}
+
+function isGoldFallbackTicker(ticker: Ticker) {
+  return ticker.symbol === "GLD" || ticker.symbol === "GC" || ticker.name.toLowerCase().includes("gold");
 }
 
 function violatesPolicyBucket(client: ClientAccount, ticker: Ticker) {
+  if (ticker.category === "commodities" && isGoldFallbackTicker(ticker)) {
+    return false;
+  }
+
   return (client.investmentPolicy.prohibitedBuckets ?? []).includes(ticker.category);
-}
-
-function getEquityExposure(client: ClientAccount, tickers: Record<string, Ticker>) {
-  let total = client.cash;
-  let equities = 0;
-
-  Object.values(client.holdings).forEach((holding) => {
-    const ticker = tickers[holding.ticker];
-
-    if (!ticker) {
-      return;
-    }
-
-    const value = ticker.price * holding.shares;
-    total += value;
-
-    if (ticker.category === "stocks" || ticker.category === "funds" || ticker.category === "futures") {
-      equities += value;
-    }
-  });
-
-  return total === 0 ? 0 : equities / total;
 }
 
 export function evaluateTradeSuitability(
@@ -72,15 +56,29 @@ export function evaluateTradeSuitability(
   let scrutinyDelta = 0;
   const projectedCost = ticker.price * quantity;
   const currentAum = client.cash + Object.values(client.holdings).reduce((total, holding) => total + (tickers[holding.ticker]?.price ?? 0) * holding.shares, 0);
-  const equityExposure = getEquityExposure(client, tickers);
-  const projectedExposure = (equityExposure * Math.max(currentAum, projectedCost) + projectedCost) / Math.max(currentAum + projectedCost, 1);
-  const riskLimit = RISK_LIMITS[client.riskProfile];
+  const allocationExposure = getAllocationExposure(client.cash, client.holdings, tickers);
+  const allocationPolicy = getAllocationPolicy(client);
+  const { projectedEquityExposure, projectedNonEquityExposure } = getProjectedAllocationExposure(
+    currentAum,
+    allocationExposure.equityValue,
+    allocationExposure.nonEquityValue,
+    ticker,
+    projectedCost
+  );
 
-  if (projectedExposure > riskLimit) {
+  if (isEquityAllocationCategory(ticker.category) && projectedEquityExposure > allocationPolicy.maxEquityPct) {
     reasons.push(
-      `Risk tolerance override: projected equity exposure would rise to ${(projectedExposure * 100).toFixed(0)}%, above the ${(riskLimit * 100).toFixed(0)}% risk ceiling for this ${client.riskProfile.toLowerCase()} mandate. ${DEFENSIVE_FIT_HINT}`
+      `Risk tolerance override: projected equity exposure would rise to ${(projectedEquityExposure * 100).toFixed(0)}%, above the ${(allocationPolicy.maxEquityPct * 100).toFixed(0)}% equity ceiling for this mandate. ${DEFENSIVE_FIT_HINT}`
     );
     scrutinyDelta += 18;
+    flags.push("risk-override", "suitability");
+  }
+
+  if (!isEquityAllocationCategory(ticker.category) && !isFixedIncomeSuitabilityCategory(ticker) && projectedNonEquityExposure > allocationPolicy.maxNonEquityPct) {
+    reasons.push(
+      `Allocation guardrail: projected non-equity exposure would rise to ${(projectedNonEquityExposure * 100).toFixed(0)}%, above the ${(allocationPolicy.maxNonEquityPct * 100).toFixed(0)}% defensive-allocation ceiling for this mandate. Keep the equity sleeve inside the ${client.investmentPolicy.equityRangeLabel ?? "current IPS lane"}.`
+    );
+    scrutinyDelta += 14;
     flags.push("risk-override", "suitability");
   }
 
@@ -94,10 +92,10 @@ export function evaluateTradeSuitability(
 
   if (
     client.riskProfile === "Conservative" &&
-    (ticker.category === "futures" || ticker.sector === "Hedge Funds" || isHighBetaTicker(ticker))
+    (ticker.category === "futures" || ticker.sector === "Hedge Funds" || isHighBetaTicker(ticker, allocationPolicy.speculativeBetaThreshold))
   ) {
     reasons.push(
-      `Unsuitable product placement: ${ticker.name} is being treated as speculative for a conservative ${client.accountType.toLowerCase()} tied to a ${ageContext(client)} client. ${betaText(ticker)} is elevated for capital-preservation goals. ${DEFENSIVE_FIT_HINT}`
+      `Unsuitable product placement: ${ticker.name} is being treated as speculative for a conservative ${client.accountType.toLowerCase()} tied to a ${ageContext(client)} client. ${betaText(ticker)} is elevated beyond the ${allocationPolicy.speculativeBetaThreshold.toFixed(2)} policy threshold for capital-preservation goals. ${DEFENSIVE_FIT_HINT}`
     );
     scrutinyDelta += 20;
     flags.push("unsuitable-product", "suitability");
@@ -119,7 +117,7 @@ export function evaluateTradeSuitability(
     flags.push("unsuitable-product", "suitability");
   }
 
-  if (client.accountType === "Institutional Endowment" && ticker.category === "stocks" && projectedExposure > 0.65) {
+  if (client.accountType === "Institutional Endowment" && ticker.category === "stocks" && projectedEquityExposure > 0.65) {
     reasons.push(
       "Suitability violation: endowment equity concentration is inconsistent with prudent diversification expectations. A single equity-heavy sleeve is too narrow for an institutional preservation-and-growth mandate."
     );
@@ -128,7 +126,7 @@ export function evaluateTradeSuitability(
   }
 
   const maxSinglePositionPct = (client.investmentPolicy.maxSinglePositionPct ?? 35) / 100;
-  if (projectedCost > client.cash * 0.75 || projectedCost > Math.max(currentAum, projectedCost) * maxSinglePositionPct) {
+  if (!isFixedIncomeSuitabilityCategory(ticker) && (projectedCost > client.cash * 0.75 || projectedCost > Math.max(currentAum, projectedCost) * maxSinglePositionPct)) {
     reasons.push(
       `Suitability concern: this single position would take ${((projectedCost / Math.max(currentAum + projectedCost, 1)) * 100).toFixed(0)}% of the account, above the client policy guardrail of ${(maxSinglePositionPct * 100).toFixed(0)}% for a single position.`
     );
@@ -139,11 +137,11 @@ export function evaluateTradeSuitability(
   if (
     client.riskProfile === "Moderate" &&
     ticker.category === "stocks" &&
-    isHighBetaTicker(ticker) &&
+    isHighBetaTicker(ticker, allocationPolicy.speculativeBetaThreshold) &&
     projectedCost > Math.max(currentAum, projectedCost) * 0.2
   ) {
     reasons.push(
-      `Risk tolerance override: ${ticker.name} is a high-beta single-name equity, and this ticket is too large for a moderate-risk client. ${betaText(ticker)} plus position size pushes the account beyond a balanced growth profile.`
+      `Risk tolerance override: ${ticker.name} is a high-beta single-name equity, and this ticket is too large for a moderate-risk client. ${betaText(ticker)} plus position size pushes the account beyond a balanced growth profile and over the ${allocationPolicy.speculativeBetaThreshold.toFixed(2)} beta threshold.`
     );
     scrutinyDelta += 14;
     flags.push("risk-override", "suitability");
